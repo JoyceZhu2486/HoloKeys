@@ -18,6 +18,7 @@
     <button id="start">Start (rear camera)</button>
     <select id="cameraSelect" title="Choose camera"></select>
     <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
   </div>
 
   <video id="preview" playsinline muted></video>
@@ -133,6 +134,41 @@
       if (document.visibilityState === 'hidden') stopStream();
     });
     window.addEventListener('pagehide', stopStream);
+
+    // extract the current camera frame
+    async function captureJpegFromVideo(video, {width, height, quality = 0.92} = {}) {
+        // pick current frame size if none provided
+        const w = width  ?? video.videoWidth;
+        const h = height ?? video.videoHeight;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+
+        // If your preview is mirrored (front camera), un-mirror for the file:
+        // ctx.scale(-1, 1); ctx.drawImage(video, -w, 0, w, h); ctx.setTransform(1,0,0,1,0,0);
+        ctx.drawImage(video, 0, 0, w, h);
+
+        // Prefer Blob (smaller & uploadable). Fallback to dataURL if needed.
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+        return blob; // type 'image/jpeg'
+    }
+
+    // Example: take a snapshot and download it
+    async function downloadSnapshot(video) {
+        const blob = await captureJpegFromVideo(video, {quality: 0.92});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        a.href = url;
+        a.download = `frame-${ts}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('snap').addEventListener('click', () => downloadSnapshot(preview));
   </script>
 </body>
 </html>
