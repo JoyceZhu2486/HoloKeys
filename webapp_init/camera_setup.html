@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    video { width: 100%; max-width: 680px; border-radius: 12px; display: block; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    select, button { padding: .5rem .75rem; }
+  </style>
+</head>
+<body>
+  <h1>Camera → Webpage</h1>
+
+  <div class="row">
+    <button id="start">Start (rear camera)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+  </div>
+
+  <video id="preview" playsinline muted></video>
+  <!-- Hidden canvas for per-frame processing (send to your CV/ML) -->
+  <canvas id="frame" hidden></canvas>
+
+  <script>
+    const video = document.getElementById('preview');
+    const startBtn = document.getElementById('start');
+    const stopBtn  = document.getElementById('stop');
+    const camSel   = document.getElementById('cameraSelect');
+    const canvas   = document.getElementById('frame');
+    const ctx      = canvas.getContext('2d', { willReadFrequently: true });
+
+    let stream = null;
+    let currentDeviceId = null;
+    let usingFront = false;
+
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === 'videoinput');
+      camSel.innerHTML = '';
+      cams.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Camera ${i+1}`;
+        camSel.appendChild(opt);
+      });
+      // Try to keep selection if we have one
+      if (currentDeviceId) camSel.value = currentDeviceId;
+    }
+
+    function stopStream() {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      stopBtn.disabled = true;
+    }
+
+    async function startStream(constraints) {
+      try {
+        // Stop previous stream if any
+        stopStream();
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        await video.play();
+        stopBtn.disabled = false;
+
+        // Update device list (labels appear only after one successful permission)
+        await listCameras();
+
+        // Determine whether we're using the front camera (mirror if so)
+        usingFront = constraints?.video?.facingMode === 'user'
+                   || constraints?.video?.facingMode?.ideal === 'user';
+        video.style.transform = usingFront ? 'scaleX(-1)' : 'none';
+      } catch (err) {
+        const msg = err?.name || err?.message || err;
+        alert('Camera error: ' + msg);
+        console.error(err);
+      }
+    }
+
+    // Pull frames for your model
+    function pump() {
+      if (!stream) return;
+      const w = video.videoWidth, h = video.videoHeight;
+      if (w && h) {
+        canvas.width = w;
+        canvas.height = h;
+        // If front camera mirrored, you may want to un-mirror here for processing
+        if (usingFront) {
+          ctx.save();
+          ctx.scale(-1, 1);          // flip
+          ctx.drawImage(video, -w, 0, w, h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(video, 0, 0, w, h);
+        }
+        // Example: raw RGBA pixels for a model
+        // const pixels = ctx.getImageData(0, 0, w, h);
+        // send `pixels` or `canvas` to your model here
+      }
+      requestAnimationFrame(pump);
+    }
+
+    // UI handlers
+    startBtn.addEventListener('click', async () => {
+      // Prefer rear camera, 720p@30fps as a starting point
+      await startStream({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: false
+      });
+    });
+
+    camSel.addEventListener('change', async (e) => {
+      currentDeviceId = camSel.value;
+      await startStream({ video: { deviceId: { exact: currentDeviceId } }, audio: false });
+    });
+
+    stopBtn.addEventListener('click', stopStream);
+
+    // Start the frame loop when the video is actually playing
+    video.addEventListener('playing', () => requestAnimationFrame(pump));
+
+    // Be a good citizen: stop camera when tab is hidden or page unloads
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') stopStream();
+    });
+    window.addEventListener('pagehide', stopStream);
+  </script>
+</body>
+</html>
