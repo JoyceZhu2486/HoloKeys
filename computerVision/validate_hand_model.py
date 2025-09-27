@@ -4,9 +4,12 @@ import cv2
 import mediapipe as mp
 
 # ---- tweakable thresholds ----
-MIN_BLUR_VAR       = 60.0   # image sharpness (variance of Laplacian)
-MIN_HAND_AREA_FRAC = 0.015  # min bbox area fraction (~1.5% of image)
-MIN_HANDED_SCORE   = 0.40   # handedness confidence (0..1)
+# MIN_BLUR_VAR       = 50.0   # image sharpness (variance of Laplacian)
+# MIN_HAND_AREA_FRAC = 0.015  # min bbox area fraction (~1.5% of image)
+# MIN_HANDED_SCORE   = 0.30   # handedness confidence (0..1)
+MIN_BLUR_VAR       = 40.0   # image sharpness (variance of Laplacian)
+MIN_HAND_AREA_FRAC = 0.001  # min bbox area fraction (~1.5% of image)
+MIN_HANDED_SCORE   = 0.05   # handedness confidence (0..1)
 # ------------------------------
 
 FINGERTIP_IDS = [4, 8, 12, 16, 20]  # thumb, index, middle, ring, pinky
@@ -44,10 +47,10 @@ def main(img_path, out_path=None):
     with mp_hands.Hands(
         static_image_mode=True,
         max_num_hands=2,
-        min_detection_confidence=0.2
+        min_detection_confidence=0.1
     ) as hands:
         rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        res = hands.process(rgb)
+        res = hands.process(rgb) 
 
     annotated = img_bgr.copy()
     hands_found = 0
@@ -136,6 +139,8 @@ if __name__ == "__main__":
     #     sys.exit(1)
     # img = sys.argv[1]
     # out = sys.argv[2] if len(sys.argv) > 2 else None
-    img = "./testImage/testImage0.jpg"
-    out = "./testImage/testImage0Res.jpg"
-    main(img, out)
+    for i in range(5){
+        img = f"./testImage/testImage%d.jpg",i
+        out = f"./testImage/testImage%dRes.jpg",i
+        main(img, out)
+    }
