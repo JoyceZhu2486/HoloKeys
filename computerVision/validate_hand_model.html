@@ -2,235 +2,294 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <title>MediaPipe Hands - Fit-to-Screen + Toolbar</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Camera Demo + Hand Detection</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 1rem; }
-    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
-    select, button, label { padding: .5rem .75rem; }
-    .stage { position: relative; width: 100%; max-width: 680px; }
-    video, canvas.overlay { width: 100%; border-radius: 12px; display: block; }
-    canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    /* Toolbar sits directly above the stage and wraps nicely on small screens */
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label {
+      font: inherit;
+    }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+    }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+
+    /* Stage wrapper (scaled) -> contains the native-size inner stage */
+    .stage-wrap {
+      position: relative;
+      /* The transform scale is applied dynamically via JS to this wrapper */
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    /* Native, exact-pixel stage holds video+canvas at camera's intrinsic size */
+    #stage {
+      position: relative;
+      background: #111;
+      /* width/height set via JS to videoWidth/videoHeight */
+    }
+    #video, #overlay {
+      position: absolute; left: 0; top: 0;
+    }
+
+    /* Make the whole thing centered but never overflow */
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center; /* center the scaled stage */
+    }
   </style>
 </head>
 <body>
-  <h1>Camera → Webpage (with Hand Detection)</h1>
+  <header><strong>MediaPipe Hands – Aligned, Scaled to Fit</strong></header>
 
-  <div class="row">
-    <button id="start">Start (rear camera)</button>
-    <select id="cameraSelect" title="Choose camera"></select>
-    <button id="stop" disabled>Stop</button>
-    <button id="snap">Capture JPG</button>
-    <label><input type="checkbox" id="live"> Live detect</label>
-    <button id="detectOnce">Detect once</button>
-  </div>
+  <main class="container">
+    <!-- Controls on top -->
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      <button id="btnDetectAndSave" disabled>Detect &amp; Save</button>
+      <span class="status" id="status">Idle</span>
+    </div>
 
-  <div class="stage">
-    <video id="preview" playsinline muted></video>
-    <canvas id="overlay" class="overlay"></canvas>
-  </div>
-
-  <!-- Hidden canvas for per-frame processing (snapshots, etc.) -->
-  <canvas id="frame" hidden></canvas>
+    <!-- Scaled wrapper; we apply transform: scale(s) here so video+overlay shrink together -->
+    <div class="stage-wrap" id="stageWrap">
+      <!-- Native-size stage -->
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+  </main>
 
   <script type="module">
-    // --- UI refs
-    const video   = document.getElementById('preview');
-    const overlay = document.getElementById('overlay');
-    const octx    = overlay.getContext('2d');
-
-    const startBtn = document.getElementById('start');
-    const stopBtn  = document.getElementById('stop');
-    const camSel   = document.getElementById('cameraSelect');
-    const snapBtn  = document.getElementById('snap');
-    const liveChk  = document.getElementById('live');
-    const onceBtn  = document.getElementById('detectOnce');
-
-    const frameCanvas = document.getElementById('frame');
-    const frameCtx    = frameCanvas.getContext('2d', { willReadFrequently: true });
-
-    let stream = null;
-    let currentDeviceId = null;
-    let usingFront = false;
-
-    // --- Camera helpers
-    async function listCameras() {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const cams = devices.filter(d => d.kind === 'videoinput');
-      camSel.innerHTML = '';
-      cams.forEach((d, i) => {
-        const opt = document.createElement('option');
-        opt.value = d.deviceId;
-        opt.textContent = d.label || `Camera ${i+1}`;
-        camSel.appendChild(opt);
-      });
-      if (currentDeviceId) camSel.value = currentDeviceId;
-    }
-
-    function stopStream() {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-        stream = null;
-      }
-      stopBtn.disabled = true;
-    }
-
-    function resizeOverlayToVideo() {
-      const w = video.videoWidth, h = video.videoHeight;
-      if (!w || !h) return;
-      overlay.width = w;
-      overlay.height = h;
-    }
-
-    async function startStream(constraints) {
-      try {
-        stopStream();
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        await video.play();
-        stopBtn.disabled = false;
-        await listCameras();
-
-        // Determine whether front cam is used (mirror video & overlay for display)
-        usingFront = constraints?.video?.facingMode === 'user'
-                  || constraints?.video?.facingMode?.ideal === 'user'
-                  || constraints?.video?.deviceId?.exact === 'front';
-        const mirror = usingFront ? 'scaleX(-1)' : 'none';
-        video.style.transform   = mirror;
-        overlay.style.transform = mirror;
-
-        // Size overlay to the actual video frame
-        resizeOverlayToVideo();
-      } catch (err) {
-        alert('Camera error: ' + (err?.message || err));
-        console.error(err);
-      }
-    }
-
-    // Extract a JPEG Blob from the current video frame
-    async function captureJpegFromVideo(video, {quality = 0.92} = {}) {
-      const w = video.videoWidth, h = video.videoHeight;
-      frameCanvas.width = w; frameCanvas.height = h;
-      // If preview is mirrored (front cam), un-mirror for the saved image if desired:
-      frameCtx.setTransform(1, 0, 0, 1, 0, 0);
-      frameCtx.drawImage(video, 0, 0, w, h);
-      const blob = await new Promise(res => frameCanvas.toBlob(res, 'image/jpeg', quality));
-      return blob; // 'image/jpeg'
-    }
-
-    async function downloadSnapshot() {
-      const blob = await captureJpegFromVideo(video, {quality: 0.92});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      a.href = url; a.download = `frame-${ts}.jpg`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    // --- Hand Landmarker (MediaPipe Tasks)
     import {
       HandLandmarker,
       FilesetResolver,
       DrawingUtils
-    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-    );
+    // DOM
+    const stageWrap = document.getElementById("stageWrap");
+    const stage     = document.getElementById("stage");
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const statusEl  = document.getElementById("status");
+    const btnStart  = document.getElementById("btnStart");
+    const chkLive   = document.getElementById("chkLive");
+    const btnDetectAndSave = document.getElementById("btnDetectAndSave");
+    const toolbar   = document.getElementById("toolbar");
 
-    // Hosted task file (float16). You can host locally if preferred.
-    const HAND_TASK_URL =
-      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
+    // Model
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    let filesetResolver = null;
+    let handLandmarker = null;
+    let drawer = null;
 
-    const handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: HAND_TASK_URL, delegate: "GPU" },
-      runningMode: "VIDEO",
-      numHands: 2,
-      minHandDetectionConfidence: 0.5,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
+    // ---- Size & alignment helpers ----
+    function setExactStageSize(w, h) {
+      // Native/intrinsic pixel size for stage/video/canvas
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
 
-    const drawer = new DrawingUtils(octx);
-    let lastVideoTime = -1;
+      video.style.width  = w + "px";
+      video.style.height = h + "px";
+
+      overlay.style.width  = w + "px";
+      overlay.style.height = h + "px";
+
+      overlay.width  = w; // canvas buffer
+      overlay.height = h;
+
+      // Also set stageWrap's base (unscaled) size so it clips correctly
+      stageWrap.style.width  = w + "px";
+      stageWrap.style.height = h + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized =
+        parseInt(stage.style.width)  === vw &&
+        parseInt(stage.style.height) === vh &&
+        overlay.width === vw && overlay.height === vh;
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
 
     function clearOverlay() {
       octx.clearRect(0, 0, overlay.width, overlay.height);
     }
 
+    // Fit the stage into the viewport under the toolbar, preserving aspect ratio.
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return; // wait until we know the camera size
+
+      // Available space: viewport minus some margins and the toolbar height
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20; // 10px left/right padding
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28); // hdr+toolbar+padding
+
+      // Choose the scale (≤1) that fits both width and height
+      const scale = Math.min(1, availableW / vw, availableH / vh);
+
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+
+    // ---- Drawing (skeleton only) ----
     function drawResults(result) {
       clearOverlay();
-      if (!result) return;
-      const { landmarks } = result;
-      if (!landmarks) return;
+      if (!result?.landmarks?.length) return;
 
-      for (const hand of landmarks) {
-        // Draw connectors & landmarks
+      for (const hand of result.landmarks) {
         drawer.drawConnectors(hand, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2 });
         drawer.drawLandmarks(hand, { radius: 3 });
       }
     }
 
-    // Live pump: runs when video is playing; gated by Live checkbox
-    function pump() {
-      if (!stream) return;
-      const w = video.videoWidth, h = video.videoHeight;
-      if (w && h) {
-        if (overlay.width !== w || overlay.height !== h) resizeOverlayToVideo();
-
-        // Process at most once per video time step
-        if (liveChk.checked) {
-          const nowMs = performance.now();
-          const vt = video.currentTime;
-          if (vt !== lastVideoTime) {
-            const result = handLandmarker.detectForVideo(video, nowMs);
-            drawResults(result);
-            lastVideoTime = vt;
-          }
-        }
-      } else {
-        clearOverlay();
-      }
-      requestAnimationFrame(pump);
-    }
-
-    // One-shot detection (on current frame)
-    function detectOnce() {
-      const nowMs = performance.now();
-      const result = handLandmarker.detectForVideo(video, nowMs);
-      drawResults(result);
-    }
-
-    // --- Wire up UI
-    startBtn.addEventListener('click', async () => {
-      await startStream({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 60 }
-        },
+    // ---- Camera ----
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
       });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+
+      btnDetectAndSave.disabled = false;
+      statusEl.textContent = "Camera ready";
+    }
+
+    // Refit on viewport changes
+    window.addEventListener("resize", fitStageToScreen);
+
+    // If the video element fires a resize (some browsers) refit again
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
     });
 
-    camSel.addEventListener('change', async () => {
-      currentDeviceId = camSel.value;
-      await startStream({ video: { deviceId: { exact: currentDeviceId } }, audio: false });
+    // ---- Live loop ----
+    let rafId = null;
+    function startLive() {
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; return; }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo(); // keep native alignment
+          const now = performance.now();
+          const result = handLandmarker.detectForVideo(video, now);
+          drawResults(result);
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    // ---- One-shot detect & save (uses native resolution, not the scaled view) ----
+    async function detectOnceAndSave() {
+      if (!video || video.readyState < 2) return;
+      if (!handLandmarker) return;
+
+      ensureSizedToVideo();
+
+      // 1) detect
+      const now = performance.now();
+      const result = handLandmarker.detectForVideo(video, now);
+
+      // 2) draw to overlay
+      drawResults(result);
+
+      // 3) composite native-size video + overlay
+      const w = overlay.width, h = overlay.height;
+      const temp = document.createElement("canvas");
+      temp.width = w; temp.height = h;
+      const tctx = temp.getContext("2d");
+      tctx.drawImage(video, 0, 0, w, h);
+      tctx.drawImage(overlay, 0, 0);
+
+      // 4) download PNG
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const url = temp.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hand_overlay_${ts}.png`;
+      a.click();
+    }
+
+    // ---- Model init ----
+    async function initModel() {
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      filesetResolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      drawer = new DrawingUtils(octx);
+      statusEl.textContent = "Model ready";
+    }
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await Promise.all([initModel(), startCamera()]);
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
     });
 
-    stopBtn.addEventListener('click', () => { stopStream(); clearOverlay(); });
-
-    onceBtn.addEventListener('click', detectOnce);
-    snapBtn.addEventListener('click', downloadSnapshot);
-
-    // Start the loop once video is ready
-    video.addEventListener('playing', () => requestAnimationFrame(pump));
-    window.addEventListener('resize', resizeOverlayToVideo);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') { stopStream(); clearOverlay(); }
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+      }
     });
-    window.addEventListener('pagehide', () => { stopStream(); clearOverlay(); });
+
+    btnDetectAndSave.addEventListener("click", () => {
+      detectOnceAndSave().catch(console.error);
+    });
   </script>
 </body>
 </html>
