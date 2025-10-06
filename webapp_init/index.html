@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    video { width: 100%; max-width: 680px; border-radius: 12px; display: block; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    select, button { padding: .5rem .75rem; }
+  </style>
+</head>
+<body>
+  <h1>Camera → Webpage</h1>
+
+  <div class="row">
+    <button id="start">Start (rear camera)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
+  </div>
+
+  <video id="preview" playsinline muted></video>
+  <canvas id="frame" hidden></canvas>
+
+  <!-- App wiring -->
+  <script type="module">
+    import {
+      startStream, stopStream, listCameras, startFrameLoop,
+      setCurrentDeviceId, getCurrentDeviceId, isUsingFront
+    } from './camera.js';
+    import { downloadSnapshot } from './snapshot.js';
+
+    const video   = document.getElementById('preview');
+    const startBtn= document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const camSel  = document.getElementById('cameraSelect');
+    const canvas  = document.getElementById('frame');
+    const snapBtn = document.getElementById('snap');
+
+    // UI handlers
+    startBtn.addEventListener('click', async () => {
+      await startStream({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 }, height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: false
+      }, { video, stopBtn, camSel });
+    });
+
+    camSel.addEventListener('change', async () => {
+      setCurrentDeviceId(camSel.value);
+      await startStream({ video: { deviceId: { exact: getCurrentDeviceId() } }, audio: false },
+                        { video, stopBtn, camSel });
+    });
+
+    stopBtn.addEventListener('click', stopStream);
+
+    // Start the frame loop once video plays
+    video.addEventListener('playing', () => startFrameLoop({ video, canvas }));
+
+    // Be a good citizen
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') stopStream();
+    });
+    window.addEventListener('pagehide', stopStream);
+
+    // Snapshot button
+    snapBtn.addEventListener('click', async () => {
+      // Pass whether preview is mirrored to save un-mirrored files if desired
+      await downloadSnapshot(video, { quality: 0.92, unmirror: isUsingFront() });
+    });
+
+    // Populate device list after first permission; calling here lets it fill if labels are already available
+    listCameras(camSel).catch(()=>{});
+  </script>
+</body>
+</html>
