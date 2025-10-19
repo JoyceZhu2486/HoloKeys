@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HoloKeys — F/J Calibration + QWERTY Overlay</title>
+  <style>
+    :root { --pad: 12px; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: var(--pad); color: #111; }
+    h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    select, button, label { padding: .5rem .75rem; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+    .stage { position: relative; width: 100%; max-width: 960px; margin-top: .5rem; }
+    video { width: 100%; border-radius: 12px; display: block; background: #000; }
+    canvas.overlay {
+      position: absolute; inset: 0; pointer-events: none;
+      width: 100%; border-radius: 12px; display: block;
+      background: transparent; z-index: 1;
+      /* NOTE: we do NOT mirror the overlay; only the video is mirrored. */
+    }
+    .pill { padding: .15rem .5rem; border-radius: 999px; background: #eef; border: 1px solid #ccd; font-size: .8rem; }
+    .sep { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>HoloKeys — F/J Calibration + QWERTY Keyboard Overlay</h1>
+
+  <div class="row">
+    <button id="start">Start (rear cam)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
+    <label class="pill"><input type="checkbox" id="live" checked> Live detect</label>
+    <label class="pill"><input type="checkbox" id="showHands" checked> Show landmarks</label>
+    <label class="pill"><input type="checkbox" id="showDebug" checked> Show F/J X</label>
+    <label class="pill"><input type="checkbox" id="blackMode"> Black screen</label>
+    <button id="recalibrate" class="pill">Recalibrate</button>
+    <span class="sep"></span>
+    <span class="pill" id="status">Idle</span>
+  </div>
+
+  <div class="stage">
+    <video id="preview" playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+  </div>
+
+  <!-- Hidden canvas for snapshots -->
+  <canvas id="frame" hidden></canvas>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

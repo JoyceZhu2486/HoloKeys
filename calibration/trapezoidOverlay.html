@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HoloKeys — F/J Calibration + Perspective Keyboard Overlay (F/J inside)</title>
+  <style>
+    :root { --pad: 12px; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: var(--pad); color: #111; }
+    h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    select, button, label { padding: .5rem .75rem; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+    .stage { position: relative; width: 100%; max-width: 960px; margin-top: .5rem; }
+    video, canvas.overlay { width: 100%; border-radius: 12px; display: block; }
+    canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
+    .hint { font-size: .9rem; color: #555; }
+    .pill { padding: .15rem .5rem; border-radius: 999px; background: #eef; border: 1px solid #ccd; font-size: .8rem; }
+    .sep { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>HoloKeys — F/J inside the trapezoid</h1>
+  <p class="hint">Hold your <strong>left</strong> and <strong>right</strong> index fingertips at <strong>F</strong> and <strong>J</strong>. The keyboard is mirrored and rendered as a trapezoid so that F/J lie <em>inside</em> the shape (not on the edge).</p>
+
+  <div class="row">
+    <button id="start">Start (rear cam)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
+    <label class="pill"><input type="checkbox" id="live" checked> Live detect</label>
+    <label class="pill"><input type="checkbox" id="showHands" checked> Show hand landmarks</label>
+    <span class="sep"></span>
+    <span class="pill" id="status">Idle</span>
+  </div>
+
+  <div class="stage">
+    <video id="preview" playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+  </div>
+
+  <!-- Hidden canvas for snapshots -->
+  <canvas id="frame" hidden></canvas>
+
+  <script type="module">
+    // ================= Camera & UI =================
+    const video   = document.getElementById('preview');
+    const overlay = document.getElementById('overlay');
+    const octx    = overlay.getContext('2d');
+
+    const startBtn = document.getElementById('start');
+    const stopBtn  = document.getElementById('stop');
+    const camSel   = document.getElementById('cameraSelect');
+    const snapBtn  = document.getElementById('snap');
+    const liveChk  = document.getElementById('live');
+    const showHandsChk = document.getElementById('showHands');
+    const statusEl = document.getElementById('status');
+
+    const frameCanvas = document.getElementById('frame');
+    const frameCtx    = frameCanvas.getContext('2d', { willReadFrequently: true });
+
+    const MIRROR_PREVIEW = true; // always mirror preview + overlay
+    let stream = null;
+    let currentDeviceId = null;
+
+    async function listCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === 'videoinput');
+      camSel.innerHTML = '';
+      cams.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Camera ${i+1}`;
+        camSel.appendChild(opt);
+      });
+      if (currentDeviceId) camSel.value = currentDeviceId;
+    }
+
+    function stopStream() {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      stopBtn.disabled = true;
+    }
+
+    function resizeOverlayToVideo() {
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) return;
+      overlay.width = w;
+      overlay.height = h;
+    }
+
+    async function startStream(constraints) {
+      try {
+        stopStream();
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        await video.play();
+        stopBtn.disabled = false;
+        await listCameras();
+
+        const mirror = MIRROR_PREVIEW ? 'scaleX(-1)' : 'none';
+        video.style.transform   = mirror;
+        overlay.style.transform = mirror;
+
+        resizeOverlayToVideo();
+      } catch (err) {
+        alert('Camera error: ' + (err?.message || err));
+        console.error(err);
+      }
+    }
+
+    async function captureJpegFromVideo(video, {quality = 0.92} = {}) {
+      const w = video.videoWidth, h = video.videoHeight;
+      frameCanvas.width = w; frameCanvas.height = h;
+      // Save snapshot mirrored like preview
+      frameCtx.setTransform(MIRROR_PREVIEW ? -1 : 1, 0, 0, 1, MIRROR_PREVIEW ? w : 0, 0);
+      frameCtx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise(res => frameCanvas.toBlob(res, 'image/jpeg', quality));
+      return blob;
+    }
+
+    async function downloadSnapshot() {
+      const blob = await captureJpegFromVideo(video, {quality: 0.92});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url; a.download = `frame-${ts}.jpg`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      await startStream({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
+        audio: false
+      });
+    });
+    camSel.addEventListener('change', async () => {
+      currentDeviceId = camSel.value;
+      await startStream({ video: { deviceId: { exact: currentDeviceId } }, audio: false });
+    });
+    stopBtn.addEventListener('click', () => { stopStream(); clearOverlay(); });
+    snapBtn.addEventListener('click', downloadSnapshot);
+    window.addEventListener('resize', resizeOverlayToVideo);
+
+    // ================= Math utils =================
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function vadd(a,b){ return {x:a.x+b.x, y:a.y+b.y}; }
+    function vsub(a,b){ return {x:a.x-b.x, y:a.y-b.y}; }
+    function vmul(a,s){ return {x:a.x*s, y:a.y*s}; }
+    function vlen(a){ return Math.hypot(a.x, a.y); }
+    function vnorm(a){ const L = vlen(a)||1; return {x:a.x/L, y:a.y/L}; }
+    function vrot90(a){ return {x:-a.y, y:a.x}; }
+    function vdot(a,b){ return a.x*b.x + a.y*b.y; }
+    function normalDown(dir){
+      const n1 = vrot90(dir);
+      return (vdot(n1,{x:0,y:1}) >= 0) ? n1 : vmul(n1,-1);
+    }
+
+    function emaPoint(prev, cur, alpha){ return !prev ? cur : { x: lerp(prev.x, cur.x, alpha), y: lerp(prev.y, cur.y, alpha) }; }
+
+    // ================= Overlay drawing =================
+    function clearOverlay(){ octx.clearRect(0,0,overlay.width,overlay.height); }
+
+    // Grid params
+    const NUM_COLS = 10;         // columns across main alpha area
+    const NUM_ROWS = 4;          // rows to draw
+    const F_COL = 3;             // zero-based column index of 'F' on home row
+    const J_COL = 6;             // zero-based column index of 'J' on home row
+    const VERTICAL_SCALE = 1.0;  // vertical pitch relative to horizontal
+    const TOP_SHRINK = 0.65;     // how much top edge narrows vs bottom (0..1)
+    const MARGIN_COLS = 0.3;     // extra columns added at both sides
+    const FJ_V = 0.22;           // where F/J live inside the quad (0=top edge, 1=bottom)
+    const MIN_SEP_PX = 80;       // min F–J separation to calibrate
+    const SMOOTH_ALPHA = 0.4;    // EMA smoothing for fingertip points
+
+    let fjCalib = null;          // {F:{x,y}, J:{x,y}}
+    let quad = null;             // {LB,RB,TR,TL}
+
+    // Build quad so that at v = FJ_V the points (uF,uJ) map exactly to F/J
+    function computeQuadFromFJ(F, J){
+      const sep = vlen(vsub(J,F));
+      if (sep < MIN_SEP_PX) return null;
+      const dirTop = vnorm(vsub(J,F));            // horizontal direction across the keyboard
+      const nDown = normalDown(dirTop);           // screen-downwards normal
+
+      // Width of the keyboard at the row where F/J lie
+      const deltaU = (J_COL - F_COL) / NUM_COLS;  // fraction across NUM_COLS between F and J centers
+      const W_row = sep / deltaU;                 // pixels across NUM_COLS at v = FJ_V
+
+      // Derive vertical pitch from horizontal key pitch at this row
+      const ux_row = W_row / NUM_COLS;
+      const uy = ux_row * VERTICAL_SCALE;
+      const totalH = NUM_ROWS * uy;
+
+      // Relationship between top & bottom widths (bottom wider)
+      const scale = 1 / TOP_SHRINK; // > 1
+
+      // Solve for top width given the row width and interpolation by v
+      const W_top_no_margin = W_row / ((1 - FJ_V) + FJ_V * scale);
+      const marginFactor = (NUM_COLS + 2 * MARGIN_COLS) / NUM_COLS;
+      const W_top = W_top_no_margin * marginFactor;
+      const W_bottom = W_top * scale;
+
+      // Centers of top and bottom edges
+      const C_row = vmul(vadd(F, J), 0.5);
+      const C_top = vsub(C_row, vmul(nDown, FJ_V * totalH));
+      const C_bottom = vadd(C_top, vmul(nDown, totalH));
+
+      // Endpoints along horizontal direction
+      const TL = vsub(C_top,    vmul(dirTop, W_top/2));
+      const TR = vadd(C_top,    vmul(dirTop, W_top/2));
+      const LB = vsub(C_bottom, vmul(dirTop, W_bottom/2));
+      const RB = vadd(C_bottom, vmul(dirTop, W_bottom/2));
+
+      return { LB, RB, TR, TL };
+    }
+
+    function mapRectToQuad(u, v, q){
+      // Bilinear map of unit rect (u,v in [0,1]) → quad (LB, RB, TR, TL)
+      const {LB, RB, TR, TL} = q;
+      const x = LB.x*(1-u)*(1-v) + RB.x*u*(1-v) + TR.x*u*v + TL.x*(1-u)*v;
+      const y = LB.y*(1-u)*(1-v) + RB.y*u*(1-v) + TR.y*u*v + TL.y*(1-u)*v;
+      return {x, y};
+    }
+
+    function drawTrapezoidGrid(q){
+      if (!q) return;
+      // Border
+      octx.strokeStyle = 'rgba(0,128,255,0.9)';
+      octx.lineWidth = 2;
+      octx.beginPath();
+      octx.moveTo(q.LB.x, q.LB.y);
+      octx.lineTo(q.RB.x, q.RB.y);
+      octx.lineTo(q.TR.x, q.TR.y);
+      octx.lineTo(q.TL.x, q.TL.y);
+      octx.closePath();
+      octx.stroke();
+
+      // Grid lines
+      octx.lineWidth = 1.25;
+      octx.strokeStyle = 'rgba(0,128,255,0.6)';
+      for (let c = 1; c < NUM_COLS; c++) {
+        const u = c / NUM_COLS;
+        const p0 = mapRectToQuad(u, 0, q);
+        const p1 = mapRectToQuad(u, 1, q);
+        octx.beginPath(); octx.moveTo(p0.x,p0.y); octx.lineTo(p1.x,p1.y); octx.stroke();
+      }
+      for (let r = 1; r < NUM_ROWS; r++) {
+        const v = r / NUM_ROWS;
+        const p0 = mapRectToQuad(0, v, q);
+        const p1 = mapRectToQuad(1, v, q);
+        octx.beginPath(); octx.moveTo(p0.x,p0.y); octx.lineTo(p1.x,p1.y); octx.stroke();
+      }
+
+      // F & J markers at the interior row FJ_V
+      const uF = (F_COL + 0.5) / NUM_COLS;
+      const uJ = (J_COL + 0.5) / NUM_COLS;
+      const pF = mapRectToQuad(uF, FJ_V, q);
+      const pJ = mapRectToQuad(uJ, FJ_V, q);
+
+      octx.fillStyle = 'rgba(0,200,0,0.95)';
+      octx.beginPath(); octx.arc(pF.x, pF.y, 5, 0, Math.PI*2); octx.fill();
+      octx.beginPath(); octx.arc(pJ.x, pJ.y, 5, 0, Math.PI*2); octx.fill();
+      octx.fillStyle = '#0a0';
+      octx.font = '12px system-ui';
+      octx.textAlign = 'center';
+      octx.textBaseline = 'top';
+      octx.fillText('F', pF.x, pF.y + 6);
+      octx.fillText('J', pJ.x, pJ.y + 6);
+    }
+
+    // ================= MediaPipe Hands =================
+    import { HandLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+
+    const HAND_TASK_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
+
+    const handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: HAND_TASK_URL, delegate: "GPU" },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.5,
+      minHandPresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    const drawer = new DrawingUtils(octx);
+
+    function drawHands(result){
+      if (!result || !showHandsChk.checked) return;
+      const { landmarks } = result;
+      if (!landmarks) return;
+      for (const hand of landmarks) {
+        drawer.drawConnectors(hand, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2 });
+        drawer.drawLandmarks(hand, { radius: 2.5 });
+      }
+    }
+
+    function pickFJFromResult(result){
+      if (!result) return null;
+      const { landmarks, handednesses } = result;
+      if (!landmarks || landmarks.length === 0) return null;
+      const W = overlay.width, H = overlay.height;
+
+      const tips = landmarks.map(hand => { const t = hand[8]; return { x: t.x*W, y: t.y*H }; });
+      let leftIdx = -1, rightIdx = -1;
+      if (Array.isArray(handednesses) && handednesses.length === landmarks.length) {
+        for (let i=0;i<handednesses.length;i++) {
+          const label = handednesses[i]?.[0]?.categoryName?.toLowerCase?.() ?? '';
+          if (label.includes('left'))  leftIdx = i;
+          if (label.includes('right')) rightIdx = i;
+        }
+      }
+      if (leftIdx === -1 || rightIdx === -1) {
+        const xForScreen = idx => (MIRROR_PREVIEW ? (W - tips[idx].x) : tips[idx].x);
+        const order = [...tips.keys()].sort((a,b)=>xForScreen(a)-xForScreen(b));
+        leftIdx = order[0]; rightIdx = order[order.length-1];
+      }
+      return { F: tips[leftIdx], J: tips[rightIdx] };
+    }
+
+    function updateCalibration(result){
+      const fj = pickFJFromResult(result);
+      if (!fj) { statusEl.textContent = 'Need both hands on F/J…'; return; }
+      if (!fjCalib) fjCalib = fj; else fjCalib = { F: emaPoint(fjCalib.F,fj.F,SMOOTH_ALPHA), J: emaPoint(fjCalib.J,fj.J,SMOOTH_ALPHA) };
+      const q = computeQuadFromFJ(fjCalib.F, fjCalib.J);
+      if (q) { quad = q; statusEl.textContent = 'Calibrated'; }
+      else { statusEl.textContent = 'Hold F/J steady…'; }
+    }
+
+    // ================= Main loop =================
+    let lastVideoTime = -1;
+    function pump(){
+      if (!stream) { requestAnimationFrame(pump); return; }
+      const w = video.videoWidth, h = video.videoHeight;
+      if (w && h) {
+        if (overlay.width !== w || overlay.height !== h) resizeOverlayToVideo();
+        if (liveChk.checked) {
+          const nowMs = performance.now();
+          const vt = video.currentTime; // run once per video frame
+          if (vt !== lastVideoTime) {
+            try {
+              const result = handLandmarker.detectForVideo(video, nowMs);
+              clearOverlay();
+              drawHands(result);
+              updateCalibration(result);
+              drawTrapezoidGrid(quad);
+              lastVideoTime = vt;
+            } catch (e) {
+              console.error('detect/draw error', e);
+              statusEl.textContent = '⚠️ detection error (see console)';
+            }
+          }
+        } else {
+          clearOverlay();
+        }
+      } else {
+        clearOverlay();
+      }
+      requestAnimationFrame(pump);
+    }
+
+    video.addEventListener('playing', () => requestAnimationFrame(pump));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') { stopStream(); clearOverlay(); }
+    });
+    window.addEventListener('pagehide', () => { stopStream(); clearOverlay(); });
+  </script>
+</body>
+</html>
