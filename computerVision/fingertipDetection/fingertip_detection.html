@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys - V7: Pixel Refinement & Contour Detection</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* CSS is retained from your working file */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label { font: inherit; }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+    }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+
+    .stage-wrap {
+      position: relative;
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    #stage { position: relative; background: #111; }
+    #video, #overlay { position: absolute; left: 0; top: 0; }
+
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center;
+    }
+    .log-panel {
+        margin-top: 15px;
+        background: #f6f6f6;
+        padding: 15px;
+        border-radius: 8px;
+        color: #1f2937;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
+</head>
+<body>
+  <header><strong>HoloKeys V7: Pixel Refinement & Contour Detection</strong></header>
+
+  <main class="container">
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      <span class="status" id="status">Idle</span>
+      <label>Threshold (0-255): <input type="number" id="inputThreshold" value="50" min="0" max="255" style="width: 50px;"></label>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+
+    <div class="log-panel">
+        <strong>Refined Contact Points (Centroids)</strong>
+        <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
+            Tracking not active.
+        </div>
+    </div>
+  </main>
+  
+  <canvas id="tempCanvas" style="display: none;"></canvas>
+
+  <script type="module">
+    import {
+      HandLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+    // --- CONFIGURATION ---
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    
+    const FINGERTIP_MAP = {
+        4: { name: "Thumb", base: 3, color: '#3b82f6', contactColor: '#fef08a' },
+        8: { name: "Index", base: 7, color: '#22c55e', contactColor: '#fde047' },
+        12: { name: "Middle", base: 11, color: '#22d3ee', contactColor: '#ef4444' },
+        16: { name: "Ring", base: 15, color: '#f97316', contactColor: '#6366f1' },
+        20: { name: "Pinky", base: 19, color: '#ec4899', contactColor: '#a78bfa' }
+    };
+    
+    const WIDTH_MARGIN = 15; 
+    const EXTENSION_FACTOR = 0.5; 
+
+    // DOM
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const tempCanvas = document.getElementById("tempCanvas");
+    const tctx      = tempCanvas.getContext("2d"); // Context for off-screen processing
+    const inputThreshold = document.getElementById("inputThreshold");
+    
+    // ... other DOM elements (statusEl, btnStart, chkLive, contactLog, etc.)
+
+    // Model and State
+    let handLandmarker = null;
+    let drawer = null;
+    let rafId = null; 
+    let lastGoodResult = null; 
+
+    // --- Utility Functions (setExactStageSize, ensureSizedToVideo, etc. - UNCHANGED) ---
+    function setExactStageSize(w, h) {
+      const stage = document.getElementById("stage");
+      const stageWrap = document.getElementById("stageWrap");
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
+      video.style.width  = w + "px";
+      video.style.height = h + "px";
+      overlay.style.width  = w + "px";
+      overlay.style.height = h + "px";
+      overlay.width  = w; 
+      overlay.height = h;
+      stageWrap.style.width  = w + "px";
+      stageWrap.style.height = h + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized = parseInt(document.getElementById("stage").style.width) === vw && parseInt(document.getElementById("stage").style.height) === vh;
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
+
+    function clearOverlay() {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const toolbar = document.getElementById("toolbar");
+      const stageWrap = document.getElementById("stageWrap");
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20;
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
+      const scale = Math.min(1, availableW / vw, availableH / vh);
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+
+    // --- Directional and Proportional ROI Logic (Unchanged) ---
+    function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
+      if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
+      
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
+      const w = overlay.width;
+      const h = overlay.height;
+
+      const pTip = { x: tip.x * w, y: tip.y * h };
+      const pBase = { x: base.x * w, y: base.y * h };
+
+      const vecX = pTip.x - pBase.x;
+      const vecY = pTip.y - pBase.y;
+      const length = Math.sqrt(vecX * vecX + vecY * vecY);
+
+      if (length < 1) return null; 
+
+      const unitX = vecX / length; 
+      const unitY = vecY / length; 
+      
+      const proportionalExtension = length * EXTENSION_FACTOR;
+
+      const pContact = { 
+          x: pTip.x + unitX * proportionalExtension, 
+          y: pTip.y + unitY * proportionalExtension 
+      };
+
+      const pTipLeft = { x: pTip.x - unitY * WIDTH_MARGIN, y: pTip.y + unitX * WIDTH_MARGIN };
+      const pTipRight = { x: pTip.x + unitY * WIDTH_MARGIN, y: pTip.y - unitX * WIDTH_MARGIN };
+      
+      const pContactLeft = { x: pContact.x - unitY * WIDTH_MARGIN, y: pContact.y + unitX * WIDTH_MARGIN };
+      const pContactRight = { x: pContact.x + unitY * WIDTH_MARGIN, y: pContact.y - unitX * WIDTH_MARGIN };
+      
+      const pBaseLeft = { x: pBase.x - unitY * WIDTH_MARGIN, y: pBase.y + unitX * WIDTH_MARGIN };
+      const pBaseRight = { x: pBase.x + unitY * WIDTH_MARGIN, y: pBase.y - unitX * WIDTH_MARGIN };
+
+      const allX = [pBaseLeft.x, pBaseRight.x, pContactLeft.x, pContactRight.x];
+      const allY = [pBaseLeft.y, pBaseRight.y, pContactLeft.y, pContactRight.y];
+
+      const minX = Math.min(...allX);
+      const maxX = Math.max(...allX);
+      const minY = Math.min(...allY);
+      const maxY = Math.max(...allY);
+
+      const boxWidth = maxX - minX;
+      const boxHeight = maxY - minY;
+
+      const contactX = pContact.x; 
+      const contactY = pContact.y; 
+
+      return { x: minX, y: minY, w: boxWidth, h: boxHeight, contactX: contactX, contactY: contactY };
+    }
+
+    // --- NEW: Pixel-Level Refinement ---
+    function refineContactPoint(roiData, color) {
+        // Set temp canvas size to the ROI box size
+        tempCanvas.width = Math.ceil(roiData.w);
+        tempCanvas.height = Math.ceil(roiData.h);
+        const roiX = Math.floor(roiData.x);
+        const roiY = Math.floor(roiData.y);
+        const roiW = tempCanvas.width;
+        const roiH = tempCanvas.height;
+        const THRESHOLD = parseInt(inputThreshold.value, 10) || 50;
+
+        // 1. Draw the ROI content from the video frame to the temp canvas
+        tctx.drawImage(video, 
+            roiX, roiY, roiW, roiH, // Source (Video)
+            0, 0, roiW, roiH        // Destination (Temp Canvas)
+        );
+
+        // 2. Get pixel data for processing
+        const imageData = tctx.getImageData(0, 0, roiW, roiH);
+        const data = imageData.data;
+
+        let totalX = 0;
+        let totalY = 0;
+        let pixelCount = 0;
+
+        // 3. Process pixels: Grayscale, Binary Thresholding, and Centroid calculation
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            
+            // Grayscale conversion
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+            // Simple Binary Thresholding (Dark areas = Finger/Foreground)
+            // If the pixel is dark enough (i.e., less than the THRESHOLD), it's part of the finger.
+            if (gray < THRESHOLD) {
+                // Pixel is part of the finger (Contour pixels)
+                
+                // Identify pixel coordinates relative to the ROI box
+                const x = (i / 4) % roiW;
+                const y = Math.floor((i / 4) / roiW);
+
+                totalX += x;
+                totalY += y;
+                pixelCount++;
+                
+                // Draw the contour approximation on the main overlay canvas
+                // We use a small, solid rectangle to represent the detected pixel
+                octx.fillStyle = color;
+                octx.fillRect(roiX + x, roiY + y, 1, 1);
+
+                // Set pixel data on temp canvas to white/transparent to clear the processing context
+                data[i] = data[i+1] = data[i+2] = 255; // White
+                data[i+3] = 0; // Transparent (for debugging, we'll keep it simple)
+            }
+        }
+        
+        // 4. Calculate Centroid (Fingertip Tip Detection)
+        if (pixelCount > 50) { // Require a minimum mass for a stable centroid
+            const centroidX_ROI = totalX / pixelCount;
+            const centroidY_ROI = totalY / pixelCount;
+
+            // Convert centroid back to overlay coordinates (The Refined Tip)
+            const refinedX = roiX + centroidX_ROI;
+            const refinedY = roiY + centroidY_ROI;
+
+            return { x: refinedX, y: refinedY, pixelCount: pixelCount };
+        }
+
+        return null; // Failed to detect a finger mass
+    }
+
+    // --- Drawing Functions (Modified) ---
+    function drawROI(roiData, boxColor) {
+        // Draw only the ROI Box (the interest area)
+        octx.strokeStyle = boxColor;
+        octx.lineWidth = 3;
+        octx.strokeRect(roiData.x, roiData.y, roiData.w, roiData.h);
+    }
+    
+    function drawRefinedTip(refinedPoint, contactColor, name) {
+        // Draw the Refined Contact Point (the centroid dot)
+        octx.fillStyle = contactColor; 
+        octx.beginPath();
+        octx.arc(refinedPoint.x, refinedPoint.y, 10, 0, 2 * Math.PI);
+        octx.fill();
+        octx.strokeStyle = '#111'; 
+        octx.lineWidth = 2;
+        octx.stroke();
+
+        // Optional: Label the point
+        octx.fillStyle = '#fff';
+        octx.font = 'bold 14px system-ui';
+        octx.fillText(name, refinedPoint.x + 15, refinedPoint.y + 5);
+    }
+
+
+    // ---- Drawing and Detection Loop (Stability Fix) ----
+    function drawResults(result) {
+      const contactLog = document.getElementById("contactLog");
+      if (result?.landmarks?.length) {
+          lastGoodResult = result;
+      }
+      
+      const resultToDraw = lastGoodResult;
+
+      clearOverlay();
+      const logMessages = [];
+
+      if (!resultToDraw?.landmarks?.length) {
+          contactLog.innerHTML = 'No hands detected.';
+          return;
+      }
+
+      for (const handLandmarks of resultToDraw.landmarks) {
+        // Draw MediaPipe skeleton
+        drawer.drawConnectors(handLandmarks, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2, color: '#eee' });
+        drawer.drawLandmarks(handLandmarks, { radius: 3, color: '#aaa', fill: false });
+        
+        // Loop through ALL five digits
+        for (const tipIndex in FINGERTIP_MAP) {
+            const config = FINGERTIP_MAP[tipIndex];
+            const roiData = calculateFingertipROI(handLandmarks, parseInt(tipIndex), config.base);
+
+            if (roiData) {
+                // 1. Draw the boundary box
+                drawROI(roiData, config.color);
+                
+                // 2. Perform pixel analysis (draws the 'contour' pixels and calculates the centroid)
+                const refinedPoint = refineContactPoint(roiData, config.color); 
+
+                if (refinedPoint) {
+                    // 3. Draw the refined tip (centroid)
+                    drawRefinedTip(refinedPoint, config.contactColor, config.name);
+
+                    // 4. Log the final contact point
+                    logMessages.push(
+                        `${config.name} (H${resultToDraw.landmarks.indexOf(handLandmarks) + 1}): X:${refinedPoint.x.toFixed(0)}, Y:${refinedPoint.y.toFixed(0)} (${refinedPoint.pixelCount}px)`
+                    );
+                }
+            }
+        }
+      }
+
+      contactLog.innerHTML = logMessages.map(msg => `<div>${msg}</div>`).join('');
+    }
+
+    // --- The rest of the functions (startCamera, startLive, initModel, UI wiring) remain the same ---
+    async function startCamera() {
+      const statusEl = document.getElementById("status");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+
+      statusEl.textContent = "Camera ready";
+    }
+
+    window.addEventListener("resize", fitStageToScreen);
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
+    });
+
+    let lastVideoTime = -1;
+    function startLive() {
+      const chkLive = document.getElementById("chkLive");
+      const statusEl = document.getElementById("status");
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; return; }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo();
+          const now = performance.now();
+          const videoTime = video.currentTime;
+
+          let result = null;
+          if (videoTime !== lastVideoTime) {
+              result = handLandmarker.detectForVideo(video, now);
+              lastVideoTime = videoTime;
+          }
+          drawResults(result);
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    async function initModel() {
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      const FilesetResolver = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).FilesetResolver;
+      const HandLandmarker = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).HandLandmarker;
+      const DrawingUtils = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).DrawingUtils;
+
+      handLandmarker = await HandLandmarker.createFromOptions(await FilesetResolver.forVisionTasks(wasmBase), {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      drawer = new DrawingUtils(octx);
+      statusEl.textContent = "Model ready";
+    }
+
+    const btnStart = document.getElementById("btnStart");
+    const chkLive = document.getElementById("chkLive");
+    const statusEl = document.getElementById("status");
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await Promise.all([initModel(), startCamera()]);
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
+    });
+
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+        clearOverlay(); 
+      }
+    });
+  </script>
+</body>
+</html>
