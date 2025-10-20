@@ -2,21 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>HoloKeys - V11: Gradient-Based Tip Detection</title>
+  <title>HoloKeys V11: Tri-Method Fingertip Tracking</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    /* CSS is retained from your working file */
+    /* Base CSS Styles for clean, responsive layout */
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
     main { padding: 10px 14px 18px; }
 
+    /* Toolbar for controls */
     .toolbar {
       display: flex; flex-wrap: wrap; gap: 8px;
       align-items: center; margin-bottom: 10px;
     }
-    .toolbar button, .toolbar label { font: inherit; }
+    .toolbar button, .toolbar label, .toolbar select { font: inherit; }
     .toolbar button {
       padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
     }
@@ -25,6 +26,7 @@
       padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
     }
 
+    /* Video and Canvas container */
     .stage-wrap {
       position: relative;
       transform-origin: top left;
@@ -42,6 +44,8 @@
       display: grid;
       justify-content: center;
     }
+
+    /* Log Panel for tracking data */
     .log-panel {
         margin-top: 15px;
         background: #f6f6f6;
@@ -49,26 +53,31 @@
         border-radius: 8px;
         color: #1f2937;
     }
-    .tip-color-box {
-        display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px;
-        vertical-align: middle;
+    .indicator-text {
+        color: #059669; /* Success color for Centroid */
+        font-weight: bold;
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
 </head>
 <body>
-  <header><strong>HoloKeys V11: Gradient-Based Tip Detection</strong></header>
+  <header><strong>HoloKeys V11: Tri-Method Fingertip Tracking</strong></header>
 
   <main class="container">
     <div class="toolbar" id="toolbar">
       <button id="btnStart">Start Camera</button>
       <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      
+      <label for="selectMethod">Fingertip Method:</label>
+      <select id="selectMethod">
+          <option value="PIXEL_CENTROID" selected>Method 4: Pixel Centroid (Optimal)</option>
+          <option value="PROJECTION">Method 2: Proportional Projection</option>
+          <option value="LANDMARK_TIP">Method 1: Landmark Tip (Baseline)</option>
+      </select>
+      
+      <label>Threshold (0-255): <input type="number" id="inputThreshold" value="50" min="0" max="255" style="width: 50px;"></label>
+      
       <span class="status" id="status">Idle</span>
-      <label>Threshold (0-255): 
-        <input type="range" id="inputThreshold" value="100" min="0" max="255" style="width: 100px;">
-        <span id="thresholdValue">100</span>
-      </label>
-      <label><input type="checkbox" id="chkProcessed"> Show Processed</label>
     </div>
 
     <div class="stage-wrap" id="stageWrap">
@@ -79,13 +88,7 @@
     </div>
 
     <div class="log-panel">
-        <strong>Refined Contact Points (Four Methods)</strong>
-        <div style="font-size: 0.75rem; margin-bottom: 5px;">
-            <span class="tip-color-box" style="background-color: #2dd4bf;"></span> Projection (M1)
-            <span class="tip-color-box" style="background-color: #f97316; margin-left: 15px;"></span> Curvature (M2)
-            <span class="tip-color-box" style="background-color: #e879f9; margin-left: 15px;"></span> Extremity (M3)
-            <span class="tip-color-box" style="background-color: #facc15; margin-left: 15px;"></span> **Gradient (M4)**
-        </div>
+        <strong>Refined Fingertip Position Log</strong>
         <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
             Tracking not active.
         </div>
@@ -101,38 +104,37 @@
       DrawingUtils
     } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 
-    // --- CONFIGURATION ---
+    // --- CONFIGURATION & CONSTANTS ---
     const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
     
-    // Define tip colors for visualization
-    const TIP_COLOR_PROJECTION = '#2dd4bf'; // Teal (Method 1)
-    const TIP_COLOR_CURVATURE = '#f97316';  // Orange (Method 2)
-    const TIP_COLOR_EXTREMITY = '#e879f9'; // Magenta (Method 3)
-    const TIP_COLOR_GRADIENT = '#facc15';  // Yellow (Method 4)
-
-    // FINGERTIP_MAP uses a single color for all ROI boxes
-    const ROI_BOX_COLOR = '#888888'; 
+    // Mapping MediaPipe landmark indices (tip and knuckle base) - Color Settings Retained
     const FINGERTIP_MAP = {
-        4: { name: "Thumb", base: 3, tip: 4, color: ROI_BOX_COLOR },
-        8: { name: "Index", base: 7, tip: 8, color: ROI_BOX_COLOR },
-        12: { name: "Middle", base: 11, tip: 12, color: ROI_BOX_COLOR },
-        16: { name: "Ring", base: 15, tip: 16, color: ROI_BOX_COLOR },
-        20: { name: "Pinky", base: 19, tip: 20, color: ROI_BOX_COLOR }
+        4: { name: "Thumb", base: 3, color: '#3b82f6', contactColor: '#fef08a' },
+        8: { name: "Index", base: 7, color: '#22c55e', contactColor: '#fde047' },
+        12: { name: "Middle", base: 11, color: '#22d3ee', contactColor: '#ef4444' },
+        16: { name: "Ring", base: 15, color: '#f97316', contactColor: '#6366f1' },
+        20: { name: "Pinky", base: 19, color: '#ec4899', contactColor: '#a78bfa' }
     };
     
-    const WIDTH_MARGIN = 15; 
-    const EXTENSION_FACTOR = 0.5; 
-    const CURVATURE_REJECTION_MARGIN = 5; // Pixels from ROI edge to reject curvature point
+    const PROPORTIONAL_WIDTH_FACTOR = 0.5; // ROI width margin (Dynamic Sizing Retained)
+    const EXTENSION_FACTOR = 0.5;          // Projection length (M2 & M4 Fallback)
+    const MIN_PIXEL_COUNT = 50;            // Minimum pixel mass required for a stable centroid
 
-    // DOM
+    // DOM Elements
     const video     = document.getElementById("video");
     const overlay   = document.getElementById("overlay");
     const octx      = overlay.getContext("2d");
     const tempCanvas = document.getElementById("tempCanvas");
-    const tctx      = tempCanvas.getContext("2d"); 
+    const tctx      = tempCanvas.getContext("2d");
     const inputThreshold = document.getElementById("inputThreshold");
-    const thresholdValue = document.getElementById("thresholdValue");
-    const chkProcessed = document.getElementById("chkProcessed");
+    const selectMethod = document.getElementById("selectMethod");
+    const contactLog = document.getElementById("contactLog");
+    const statusEl = document.getElementById("status");
+    const btnStart = document.getElementById("btnStart");
+    const chkLive = document.getElementById("chkLive");
+    const stage = document.getElementById("stage");
+    const stageWrap = document.getElementById("stageWrap");
+    const toolbar = document.getElementById("toolbar");
 
     // Model and State
     let handLandmarker = null;
@@ -140,16 +142,10 @@
     let rafId = null; 
     let lastGoodResult = null; 
 
-    // --- Utility Functions ---
+    // --- Utility Functions (Sizing) ---
     function setExactStageSize(w, h) {
-      const stage = document.getElementById("stage");
-      const stageWrap = document.getElementById("stageWrap");
       stage.style.width  = w + "px";
       stage.style.height = h + "px";
-      video.style.width  = w + "px";
-      video.style.height = h + "px";
-      overlay.style.width  = w + "px";
-      overlay.style.height = h + "px";
       overlay.width  = w; 
       overlay.height = h;
       stageWrap.style.width  = w + "px";
@@ -160,7 +156,7 @@
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (!vw || !vh) return false;
-      const sized = parseInt(document.getElementById("stage").style.width) === vw && parseInt(document.getElementById("stage").style.height) === vh;
+      const sized = parseInt(stage.style.width) === vw && parseInt(stage.style.height) === vh;
       if (!sized) setExactStageSize(vw, vh);
       return true;
     }
@@ -173,8 +169,6 @@
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (!vw || !vh) return;
-      const toolbar = document.getElementById("toolbar");
-      const stageWrap = document.getElementById("stageWrap");
       const toolbarRect = toolbar.getBoundingClientRect();
       const availableW = document.documentElement.clientWidth - 20;
       const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
@@ -182,13 +176,12 @@
       stageWrap.style.transform = `scale(${scale})`;
     }
 
-    // --- Directional and Proportional ROI Logic ---
+    // --- ROI and Proportional Projection (M2) ---
     function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
       if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
       
-      // Use TIP_BASE (e.g. 7-8 vector) for direction, but the ROI must cover the whole area
-      const tip = landmarks[tipIndex]; // e.g., Point 8 (DIP)
-      const base = landmarks[baseIndex]; // e.g., Point 7 (PIP)
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
       const w = overlay.width;
       const h = overlay.height;
 
@@ -197,361 +190,124 @@
 
       const vecX = pTip.x - pBase.x;
       const vecY = pTip.y - pBase.y;
-      const length = Math.sqrt(vecX * vecX + vecY * vecY);
+      const length = Math.sqrt(vecX * vecX + vecY * vecY); 
 
       if (length < 1) return null; 
-
       const unitX = vecX / length; 
       const unitY = vecY / length; 
       
+      // Proportional Projection Point (M2)
       const proportionalExtension = length * EXTENSION_FACTOR;
-
-      const pContact = { 
+      const pProjection = { 
           x: pTip.x + unitX * proportionalExtension, 
           y: pTip.y + unitY * proportionalExtension 
       };
-      
-      // Bounding box calculation remains the same
-      const pTipLeft = { x: pTip.x - unitY * WIDTH_MARGIN, y: pTip.y + unitX * WIDTH_MARGIN };
-      const pTipRight = { x: pTip.x + unitY * WIDTH_MARGIN, y: pTip.y - unitX * WIDTH_MARGIN };
-      const pContactLeft = { x: pContact.x - unitY * WIDTH_MARGIN, y: pContact.y + unitX * WIDTH_MARGIN };
-      const pContactRight = { x: pContact.x + unitY * WIDTH_MARGIN, y: pContact.y - unitX * WIDTH_MARGIN };
-      const pBaseLeft = { x: pBase.x - unitY * WIDTH_MARGIN, y: pBase.y + unitX * WIDTH_MARGIN };
-      const pBaseRight = { x: pBase.x + unitY * WIDTH_MARGIN, y: pBase.y - unitX * WIDTH_MARGIN };
 
-      const allX = [pBaseLeft.x, pBaseRight.x, pContactLeft.x, pContactRight.x];
-      const allY = [pBaseLeft.y, pBaseRight.y, pContactLeft.y, pContactRight.y];
+      // Calculate ROI box coordinates with PROPORTIONAL WIDTH
+      const widthMargin = length * PROPORTIONAL_WIDTH_FACTOR; 
 
-      const minX = Math.min(...allX);
-      const maxX = Math.max(...allX);
-      const minY = Math.min(...allY);
-      const maxY = Math.max(...allY);
+      const allX = [pBase.x, pProjection.x];
+      const allY = [pBase.y, pProjection.y];
 
-      const boxWidth = maxX - minX;
-      const boxHeight = maxY - minY;
+      const sideMarginX = Math.abs(unitY * widthMargin);
+      const sideMarginY = Math.abs(unitX * widthMargin);
+
+      const minX = Math.min(...allX) - sideMarginX;
+      const maxX = Math.max(...allX) + sideMarginX;
+      const minY = Math.min(...allY) - sideMarginY;
+      const maxY = Math.max(...allY) + sideMarginY;
 
       return { 
-          x: minX, y: minY, w: boxWidth, h: boxHeight,
-          pTip: pTip, pBase: pBase,
-          unitX: unitX, unitY: unitY
+          x: minX, y: minY, w: maxX - minX, h: maxY - minY, 
+          landmarkTipX: pTip.x, landmarkTipY: pTip.y, // M1 data
+          projectionX: pProjection.x, projectionY: pProjection.y // M2 data (also used for M4 fallback)
       };
     }
 
-    // --- Box Blur Pre-Filter (UNMODIFIED) ---
-    function applyBoxBlur3x3(data, w, h) {
-        const dataCopy = new Uint8ClampedArray(data);
-        
-        for (let i = 0; i < data.length; i += 4) {
-            const x = (i / 4) % w;
-            const y = Math.floor((i / 4) / w);
-
-            let sumR = 0, sumG = 0, sumB = 0;
-            let count = 0;
-
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    const nx = x + dx;
-                    const ny = y + dy;
-
-                    if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                        const ni = (ny * w + nx) * 4;
-                        sumR += dataCopy[ni];
-                        sumG += dataCopy[ni + 1];
-                        sumB += dataCopy[ni + 2];
-                        count++;
-                    }
-                }
-            }
-            
-            data[i] = sumR / count;
-            data[i + 1] = sumG / count;
-            data[i + 2] = sumB / count;
-        }
-    }
-    
-    // --- Helper function for Curvature: calculates angle between two vectors ---
-    function angleBetween(p1, p2, p3) {
-        // Vector 1 (p2 to p1)
-        const v1x = p1.x - p2.x;
-        const v1y = p1.y - p2.y;
-        // Vector 2 (p2 to p3)
-        const v2x = p3.x - p2.x;
-        const v2y = p3.y - p2.y;
-
-        const dot = v1x * v2x + v1y * v2y;
-        const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
-        const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
-        
-        if (mag1 === 0 || mag2 === 0) return Math.PI; 
-
-        let cos_theta = dot / (mag1 * mag2);
-        cos_theta = Math.max(-1, Math.min(1, cos_theta));
-        
-        return Math.acos(cos_theta);
-    }
-    
-    // --- Helper to convert ROI coordinates to pixel index ---
-    function coordsToIndex(x, y, w) {
-        return Math.floor(y) * w + Math.floor(x);
-    }
-    
-    // --- Helper to get Grayscale value from image data at ROI coordinates ---
-    function getGray(x, y, data, w) {
-        const index = coordsToIndex(x, y, w);
-        const i = index * 4;
-        if (i < 0 || i + 2 >= data.length) return -1; // Out of bounds
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        return 0.299 * r + 0.587 * g + 0.114 * b;
-    }
-
-
-    // --- UPDATED: Pixel-Level Refinement & Four Tips ---
-    function refineContactPoint(roiData, color) {
-        
-        const showProcessed = chkProcessed.checked;
+    // --- Pixel Centroid Detection (Method 4) ---
+    function findCentroid(roiData, contourColor) {
+        tempCanvas.width = Math.ceil(roiData.w);
+        tempCanvas.height = Math.ceil(roiData.h);
         const roiX = Math.floor(roiData.x);
         const roiY = Math.floor(roiData.y);
-        const roiW = Math.ceil(roiData.w);
-        const roiH = Math.ceil(roiData.h);
-        const THRESHOLD = parseInt(inputThreshold.value, 10) || 100;
+        const roiW = tempCanvas.width;
+        const roiH = tempCanvas.height;
+        const THRESHOLD = parseInt(inputThreshold.value, 10) || 50;
 
-        // 1. Setup ROI and Blur
-        tempCanvas.width = roiW;
-        tempCanvas.height = roiH;
         tctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, roiW, roiH);
         const imageData = tctx.getImageData(0, 0, roiW, roiH);
         const data = imageData.data;
-        applyBoxBlur3x3(data, roiW, roiH);
 
-        // Map and lists
-        const isForeground = new Array(roiW * roiH).fill(false);
-        let foregroundPixels = []; 
-        let grayMap = [];
-        
-        // Tracking for Method 3 (Extremity) and Method 1 (Projection)
-        let maxDistSq = -1;
-        let extremityPixel = null;
-        let maxProjection = -Infinity;
-        let projectionPixel = null;
+        let totalX = 0;
+        let totalY = 0;
+        let pixelCount = 0;
 
-        // Coordinates for calculations
-        const pBase_ROI = { x: roiData.pBase.x - roiX, y: roiData.pBase.y - roiY };
-        const unitX = roiData.unitX;
-        const unitY = roiData.unitY;
-
-        // --- Pass 1: Thresholding, Foreground Map, Projection, and Extremity ---
+        // Iterate through pixels for Grayscaling and Thresholding
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i];
             const g = data[i + 1];
             const b = data[i + 2];
             
             const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            grayMap.push(gray);
-            const index = i / 4;
-
+            
             if (gray < THRESHOLD) {
-                const x = index % roiW;
-                const y = Math.floor(index / roiW);
+                const x = (i / 4) % roiW;
+                const y = Math.floor((i / 4) / roiW);
 
-                isForeground[index] = true;
-                // Store in full overlay coordinates for drawing, and ROI coordinates for calculation
-                foregroundPixels.push({x: roiX + x, y: roiY + y, x_roi: x, y_roi: y});
+                totalX += x;
+                totalY += y;
+                pixelCount++;
                 
-                // Method 3: Max Extremity
-                const distSq = Math.pow(x - pBase_ROI.x, 2) + Math.pow(y - pBase_ROI.y, 2);
-                if (distSq > maxDistSq) {
-                    maxDistSq = distSq;
-                    extremityPixel = { x: roiX + x, y: roiY + y };
-                }
-
-                // Method 1: Directional Projection
-                const vec_x = x - pBase_ROI.x;
-                const vec_y = y - pBase_ROI.y;
-                const projection = vec_x * unitX + vec_y * unitY; 
-
-                if (projection > maxProjection) {
-                    maxProjection = projection;
-                    projectionPixel = { x: roiX + x, y: roiY + y };
-                }
-
-                if (showProcessed) {
-                    data[i] = data[i+1] = data[i+2] = 255; // White (Foreground)
-                }
-            } else {
-                if (showProcessed) {
-                    data[i] = data[i+1] = data[i+2] = 0; // Black (Background)
-                }
+                // Draw the contour approximation on the main overlay
+                octx.fillStyle = contourColor;
+                octx.fillRect(roiX + x, roiY + y, 1, 1);
             }
         }
         
-        if (foregroundPixels.length < 50) return null; // Minimum mass requirement
-
-
-        // --- Method 2: Curvature-Based Tip (with rejection logic) ---
-        let edgePixels = [];
-        const neighborOffsets = [{dx: 0, dy: -1}, {dx: 1, dy: -1}, {dx: 1, dy: 0}, {dx: 1, dy: 1}, 
-                               {dx: 0, dy: 1}, {dx: -1, dy: 1}, {dx: -1, dy: 0}, {dx: -1, dy: -1}];
-
-        // 2a. Identify Edge Pixels
-        for (const p of foregroundPixels) {
-            let isEdge = false;
-            for (const offset of neighborOffsets) {
-                const nx = p.x_roi + offset.dx;
-                const ny = p.y_roi + offset.dy;
-                const nIndex = ny * roiW + nx;
-
-                if (nx < 0 || nx >= roiW || ny < 0 || ny >= roiH || !isForeground[nIndex]) {
-                    isEdge = true;
-                    break;
-                }
-            }
-            if (isEdge) {
-                edgePixels.push(p);
-            }
-        }
-        
-        // 2b. Find Point of Maximum Curvature
-        let minAngle = Infinity;
-        let curvaturePixel = null;
-        const curvatureWindow = 5; 
-
-        if (edgePixels.length > curvatureWindow * 2) {
-            for (let i = 0; i < edgePixels.length; i++) {
-                const p2 = edgePixels[i];
-                
-                const i1 = (i - curvatureWindow + edgePixels.length) % edgePixels.length;
-                const p1 = edgePixels[i1];
-
-                const i3 = (i + curvatureWindow) % edgePixels.length;
-                const p3 = edgePixels[i3];
-
-                const angle = angleBetween(p1, p2, p3);
-
-                if (angle < minAngle) {
-                    minAngle = angle;
-                    curvaturePixel = { x: p2.x, y: p2.y };
-                }
-            }
-        }
-        
-        // 2c. CURVATURE FIX: Reject if too close to ROI boundary
-        if (curvaturePixel) {
-            const cx = curvaturePixel.x - roiX;
-            const cy = curvaturePixel.y - roiY;
-            if (cx < CURVATURE_REJECTION_MARGIN || cx > roiW - CURVATURE_REJECTION_MARGIN ||
-                cy < CURVATURE_REJECTION_MARGIN || cy > roiH - CURVATURE_REJECTION_MARGIN) {
-                // Point is too close to the boundary, reject it.
-                curvaturePixel = projectionPixel; 
-            }
+        // Calculate Centroid or Fallback
+        if (pixelCount > MIN_PIXEL_COUNT) {
+            const refinedX = roiX + (totalX / pixelCount);
+            const refinedY = roiY + (totalY / pixelCount);
+            return { 
+                x: refinedX, y: refinedY, 
+                source: 'Centroid (M4)', 
+                pixels: pixelCount 
+            };
         } else {
-             // Fallback if not enough edge pixels were found
-             curvaturePixel = projectionPixel; 
+            // Fallback to M2 (Proportional Projection)
+            return { 
+                x: roiData.projectionX, 
+                y: roiData.projectionY, 
+                source: 'Fallback (M2)', 
+                pixels: pixelCount 
+            };
         }
-
-        // --- Method 4: Color Gradient Tip (NEW) ---
-        let gradientPixel = null;
-        let maxGradient = -Infinity;
-        const searchStep = 1; // Sample every pixel along the axis
-
-        // Start search line from the tip landmark (pTip) and extend outwards (40 steps)
-        for (let step = 0; step < 40; step += searchStep) {
-            const x1_roi = Math.round(roiData.pTip.x - roiX + unitX * step);
-            const y1_roi = Math.round(roiData.pTip.y - roiY + unitY * step);
-            
-            const x2_roi = Math.round(roiData.pTip.x - roiX + unitX * (step + searchStep));
-            const y2_roi = Math.round(roiData.pTip.y - roiY + unitY * (step + searchStep));
-            
-            const gray1 = getGray(x1_roi, y1_roi, data, roiW);
-            const gray2 = getGray(x2_roi, y2_roi, data, roiW);
-
-            if (gray1 === -1 || gray2 === -1) break; // Out of ROI box
-            
-            // Gradient is the change from dark (low gray) to bright (high gray)
-            const gradient = gray2 - gray1;
-            
-            // We are looking for the maximum *positive* change (dark to light)
-            if (gradient > maxGradient) {
-                maxGradient = gradient;
-                // Place the pixel at the point of transition (p2)
-                gradientPixel = { x: roiX + x2_roi, y: roiY + y2_roi };
-            }
-            
-            // Stop once we've hit a large gradient change (i.e., we are outside the finger)
-            if (maxGradient > 50) { // Threshold for a 'sharp' change
-                 break;
-            }
-        }
-        
-        // Fallback for Gradient Tip if detection failed
-        if (!gradientPixel) {
-            gradientPixel = projectionPixel;
-        }
-
-
-        // 5. Visualization
-        if (showProcessed) {
-            tctx.putImageData(imageData, 0, 0);
-            octx.drawImage(tempCanvas, roiX, roiY, roiW, roiH);
-        } else if (foregroundPixels.length > 0) {
-            // Draw contour approximation
-            octx.fillStyle = color;
-            foregroundPixels.forEach(p => {
-                octx.fillRect(p.x, p.y, 1, 1);
-            });
-        }
-        
-        // 6. Return Final Results
-        return { 
-            projection: projectionPixel,
-            curvature: curvaturePixel,
-            extremity: extremityPixel,
-            gradient: gradientPixel
-        };
     }
 
-    // --- Drawing four distinct tips ---
-    function drawFourTips(results, name) {
-        const radius = 8;
-        
-        // Method 1: Directional Projection (Teal)
-        octx.fillStyle = TIP_COLOR_PROJECTION; 
+    // --- Drawing Functions ---
+    function drawROIBox(roiData, boxColor) {
+        octx.strokeStyle = boxColor;
+        octx.lineWidth = 3;
+        octx.strokeRect(roiData.x, roiData.y, roiData.w, roiData.h);
+    }
+    
+    function drawFinalTip(point, contactColor, name) {
+        octx.fillStyle = contactColor; 
         octx.beginPath();
-        octx.arc(results.projection.x, results.projection.y, radius * 0.6, 0, 2 * Math.PI);
-        octx.fill();
-        
-        // Method 2: Curvature Tip (Orange)
-        octx.fillStyle = TIP_COLOR_CURVATURE; 
-        octx.beginPath();
-        octx.arc(results.curvature.x, results.curvature.y, radius * 0.8, 0, 2 * Math.PI);
-        octx.fill();
-
-        // Method 3: Max Extremity (Magenta)
-        octx.fillStyle = TIP_COLOR_EXTREMITY; 
-        octx.beginPath();
-        octx.arc(results.extremity.x, results.extremity.y, radius * 0.6, 0, 2 * Math.PI);
-        octx.fill();
-
-        // Method 4: Color Gradient Tip (Yellow, largest to indicate importance)
-        octx.fillStyle = TIP_COLOR_GRADIENT; 
-        octx.beginPath();
-        octx.arc(results.gradient.x, results.gradient.y, radius, 0, 2 * Math.PI);
+        octx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
         octx.fill();
         octx.strokeStyle = '#111'; 
         octx.lineWidth = 2;
         octx.stroke();
 
-        // Label the point (using Gradient position as base)
         octx.fillStyle = '#fff';
         octx.font = 'bold 14px system-ui';
-        octx.fillText(name, results.gradient.x + 15, results.gradient.y + 5);
+        octx.fillText(name, point.x + 15, point.y + 5);
     }
 
-
-    // ---- Drawing and Detection Loop (UPDATED) ----
+    // ---- Main Drawing and Detection Loop ----
     function drawResults(result) {
-      const contactLog = document.getElementById("contactLog");
+      const selectedMethod = selectMethod.value;
       if (result?.landmarks?.length) {
           lastGoodResult = result;
       }
@@ -567,43 +323,65 @@
       }
 
       for (const handLandmarks of resultToDraw.landmarks) {
-        // Draw MediaPipe skeleton
+        // Draw MediaPipe skeleton for context
         drawer.drawConnectors(handLandmarks, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2, color: '#eee' });
         drawer.drawLandmarks(handLandmarks, { radius: 3, color: '#aaa', fill: false });
         
+        // Process each digit
         for (const tipIndex in FINGERTIP_MAP) {
             const config = FINGERTIP_MAP[tipIndex];
-            const roiData = calculateFingertipROI(handLandmarks, parseInt(config.tip), config.base);
+            const roiData = calculateFingertipROI(handLandmarks, parseInt(tipIndex), config.base);
 
-            if (roiData) {
-                // 1. Draw the boundary box
-                octx.strokeStyle = config.color;
-                octx.lineWidth = 3;
-                octx.strokeRect(roiData.x, roiData.y, roiData.w, roiData.h);
+            if (!roiData) continue;
+            
+            let finalTip = null;
+            let pixels = 0; 
+            
+            if (selectedMethod === 'LANDMARK_TIP') {
+                // Method 1: Raw Landmark Tip (Baseline)
+                finalTip = { 
+                    x: roiData.landmarkTipX, 
+                    y: roiData.landmarkTipY, 
+                    source: 'Landmark Tip (M1)', 
+                };
+            } 
+            
+            else if (selectedMethod === 'PROJECTION') {
+                // Method 2: Proportional Projection
+                finalTip = { 
+                    x: roiData.projectionX, 
+                    y: roiData.projectionY, 
+                    source: 'Projection (M2)', 
+                };
+            }
+            
+            else if (selectedMethod === 'PIXEL_CENTROID') {
+                // Method 4: Centroid Pixel Refinement (Optimal)
+                drawROIBox(roiData, config.color); // Draw the dynamic ROI box
                 
-                // 2. Perform pixel analysis and four tip calculations
-                const tipResults = refineContactPoint(roiData, config.color); 
+                const centroidResult = findCentroid(roiData, config.color);
+                finalTip = centroidResult;
+                pixels = centroidResult.pixels;
+            }
+            
+            // Draw the final marker and log the result
+            if (finalTip) {
+                drawFinalTip(finalTip, config.contactColor, config.name);
 
-                if (tipResults) {
-                    // 3. Draw all four tips
-                    drawFourTips(tipResults, config.name);
+                const statusClass = finalTip.source.includes('Centroid') ? 'indicator-text' : '';
 
-                    // 4. Log the final contact points
-                    logMessages.push(
-                        `${config.name} (H${resultToDraw.landmarks.indexOf(handLandmarks) + 1}): G:${tipResults.gradient.x.toFixed(0)}, ${tipResults.gradient.y.toFixed(0)} | C:${tipResults.curvature.x.toFixed(0)}, ${tipResults.curvature.y.toFixed(0)} | P:${tipResults.projection.x.toFixed(0)}, ${tipResults.projection.y.toFixed(0)} | E:${tipResults.extremity.x.toFixed(0)}, ${tipResults.extremity.y.toFixed(0)}`
-                    );
-                }
+                logMessages.push(
+                    `<div>${config.name} (<span class="${statusClass}">${finalTip.source}</span>): X:${finalTip.x.toFixed(1)}, Y:${finalTip.y.toFixed(1)} [P:${pixels}]</div>`
+                );
             }
         }
       }
 
-      contactLog.innerHTML = logMessages.map(msg => `<div>${msg}</div>`).join('');
+      contactLog.innerHTML = logMessages.join('');
     }
 
-
-    // --- The rest of the functions (startCamera, startLive, initModel, UI wiring) remain the same ---
+    // --- MediaPipe / Camera Initialization and Loop (Unchanged) ---
     async function startCamera() {
-      const statusEl = document.getElementById("status");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
@@ -618,7 +396,6 @@
 
       ensureSizedToVideo();
       fitStageToScreen();
-
       statusEl.textContent = "Camera ready";
     }
 
@@ -627,20 +404,13 @@
       ensureSizedToVideo();
       fitStageToScreen();
     });
-    
-    // Wire up the threshold display
-    inputThreshold.addEventListener('input', () => {
-        thresholdValue.textContent = inputThreshold.value;
-    });
 
     let lastVideoTime = -1;
     function startLive() {
-      const chkLive = document.getElementById("chkLive");
-      const statusEl = document.getElementById("status");
       if (rafId) return;
       statusEl.textContent = "Live…";
       const loop = () => {
-        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; return; }
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; clearOverlay(); return; }
         if (video.readyState >= 2 && handLandmarker) {
           ensureSizedToVideo();
           const now = performance.now();
@@ -659,14 +429,11 @@
     }
 
     async function initModel() {
-      const statusEl = document.getElementById("status");
       statusEl.textContent = "Loading model…";
       const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
-      const FilesetResolver = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).FilesetResolver;
-      const HandLandmarker = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).HandLandmarker;
-      const DrawingUtils = (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")).DrawingUtils;
-
-      handLandmarker = await HandLandmarker.createFromOptions(await FilesetResolver.forVisionTasks(wasmBase), {
+      
+      let resolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, {
         baseOptions: { modelAssetPath: MODEL_URL },
         numHands: 2,
         runningMode: "VIDEO",
@@ -675,15 +442,12 @@
       statusEl.textContent = "Model ready";
     }
 
-    const btnStart = document.getElementById("btnStart");
-    const chkLive = document.getElementById("chkLive");
-    const statusEl = document.getElementById("status");
-
     // ---- UI wiring ----
     btnStart.addEventListener("click", async () => {
       btnStart.disabled = true;
       try {
-        await Promise.all([initModel(), startCamera()]);
+        await initModel(); 
+        await startCamera();
       } catch (e) {
         console.error(e);
         statusEl.textContent = "Error starting camera/model";
@@ -703,7 +467,7 @@
         cancelAnimationFrame(rafId);
         rafId = null;
         statusEl.textContent = "Camera ready";
-        clearOverlay(); 
+        clearOverlay();
       }
     });
   </script>
