@@ -9,6 +9,22 @@
     video { width: 100%; max-width: 680px; border-radius: 12px; display: block; }
     .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
     select, button { padding: .5rem .75rem; }
+
+    /* Editor styles */
+    .editor-wrap { max-width: 680px; margin-top: 1rem; }
+    #editor {
+      width: 100%;
+      min-height: 220px;
+      padding: 0.75rem 1rem;
+      border: 1px solid #ccc;
+      border-radius: 12px;
+      font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      resize: vertical;
+      box-sizing: border-box;
+      outline: none;
+    }
+    #editor:focus { border-color: #6aa1ff; box-shadow: 0 0 0 3px rgba(100,150,255,.2); }
+    .editor-toolbar { display:flex; gap:.5rem; margin:.5rem 0; }
   </style>
 </head>
 <body>
@@ -25,6 +41,15 @@
   <!-- Hidden canvas for per-frame processing (send to your CV/ML) -->
   <canvas id="frame" hidden></canvas>
 
+  <!-- Simple Text Editor -->
+  <section class="editor-wrap">
+    <div class="editor-toolbar">
+      <button id="focusEditorBtn" type="button">Focus editor</button>
+      <button id="clearEditorBtn" type="button">Clear</button>
+    </div>
+    <textarea id="editor" placeholder="Type here… or have your virtual keyboard call insertText()/pressKey()."></textarea>
+  </section>
+
   <script>
     const video = document.getElementById('preview');
     const startBtn = document.getElementById('start');
@@ -32,6 +57,65 @@
     const camSel   = document.getElementById('cameraSelect');
     const canvas   = document.getElementById('frame');
     const ctx      = canvas.getContext('2d', { willReadFrequently: true });
+
+    // --- Editor elements & helpers ---
+    const editor = document.getElementById('editor');
+    const focusEditorBtn = document.getElementById('focusEditorBtn');
+    const clearEditorBtn = document.getElementById('clearEditorBtn');
+
+    function focusEditor() { editor.focus(); }
+    function setValueAndCaret(text, caretPos) {
+      const wasFocused = document.activeElement === editor;
+      editor.value = text;
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!wasFocused) editor.focus();
+      editor.setSelectionRange(caretPos, caretPos);
+    }
+    // Programmatic typing for your virtual keyboard:
+    function insertText(text) {
+      const { selectionStart, selectionEnd, value } = editor;
+      const before = value.slice(0, selectionStart);
+      const after  = value.slice(selectionEnd);
+      const next = before + text + after;
+      const pos = before.length + text.length;
+      setValueAndCaret(next, pos);
+    }
+    function pressKey(key) {
+      const { selectionStart, selectionEnd, value } = editor;
+      if (key === 'Backspace') {
+        if (selectionStart !== selectionEnd) {
+          setValueAndCaret(value.slice(0, selectionStart) + value.slice(selectionEnd), selectionStart);
+        } else if (selectionStart > 0) {
+          const pos = selectionStart - 1;
+          setValueAndCaret(value.slice(0, pos) + value.slice(selectionEnd), pos);
+        }
+        return;
+      }
+      if (key === 'Delete') {
+        if (selectionStart !== selectionEnd) {
+          setValueAndCaret(value.slice(0, selectionStart) + value.slice(selectionEnd), selectionStart);
+        } else if (selectionStart < value.length) {
+          setValueAndCaret(value.slice(0, selectionStart) + value.slice(selectionStart + 1), selectionStart);
+        }
+        return;
+      }
+      if (key === 'Enter') { insertText('\n'); return; }
+      if (key === 'Space') { insertText(' ');  return; }
+      if (typeof key === 'string' && key.length === 1) insertText(key);
+    }
+    // Nice-to-haves: autosize + Tab inserts spaces
+    editor.addEventListener('input', () => {
+      editor.style.height = 'auto';
+      editor.style.height = Math.min(editor.scrollHeight, 800) + 'px';
+    });
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        insertText('  '); // 2 spaces
+      }
+    });
+    focusEditorBtn.addEventListener('click', focusEditor);
+    clearEditorBtn.addEventListener('click', () => { editor.value=''; editor.dispatchEvent(new Event('input')); focusEditor(); });
 
     let stream = null;
     let currentDeviceId = null;
@@ -47,7 +131,6 @@
         opt.textContent = d.label || `Camera ${i+1}`;
         camSel.appendChild(opt);
       });
-      // Try to keep selection if we have one
       if (currentDeviceId) camSel.value = currentDeviceId;
     }
 
@@ -61,114 +144,84 @@
 
     async function startStream(constraints) {
       try {
-        // Stop previous stream if any
         stopStream();
-
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
         await video.play();
         stopBtn.disabled = false;
-
-        // Update device list (labels appear only after one successful permission)
         await listCameras();
-
-        // Determine whether we're using the front camera (mirror if so)
         usingFront = constraints?.video?.facingMode === 'user'
-                   || constraints?.video?.facingMode?.ideal === 'user';
+                  || constraints?.video?.facingMode?.ideal === 'user';
         video.style.transform = usingFront ? 'scaleX(-1)' : 'none';
+        // optional: focus editor after camera starts
+        focusEditor();
       } catch (err) {
-        const msg = err?.name || err?.message || err;
-        alert('Camera error: ' + msg);
+        alert('Camera error: ' + (err?.name || err?.message || err));
         console.error(err);
       }
     }
 
-    // Pull frames for your model
     function pump() {
       if (!stream) return;
       const w = video.videoWidth, h = video.videoHeight;
       if (w && h) {
         canvas.width = w;
         canvas.height = h;
-        // If front camera mirrored, you may want to un-mirror here for processing
         if (usingFront) {
-          ctx.save();
-          ctx.scale(-1, 1);          // flip
-          ctx.drawImage(video, -w, 0, w, h);
-          ctx.restore();
+          ctx.save(); ctx.scale(-1,1); ctx.drawImage(video, -w, 0, w, h); ctx.restore();
         } else {
           ctx.drawImage(video, 0, 0, w, h);
         }
-        // Example: raw RGBA pixels for a model
-        // const pixels = ctx.getImageData(0, 0, w, h);
-        // send `pixels` or `canvas` to your model here
+        // const pixels = ctx.getImageData(0, 0, w, h); // use later if needed
       }
       requestAnimationFrame(pump);
     }
 
-    // UI handlers
     startBtn.addEventListener('click', async () => {
-      // Prefer rear camera, 720p@30fps as a starting point
       await startStream({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 60 }
-        },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
         audio: false
       });
     });
 
-    camSel.addEventListener('change', async (e) => {
+    camSel.addEventListener('change', async () => {
       currentDeviceId = camSel.value;
       await startStream({ video: { deviceId: { exact: currentDeviceId } }, audio: false });
     });
 
     stopBtn.addEventListener('click', stopStream);
-
-    // Start the frame loop when the video is actually playing
     video.addEventListener('playing', () => requestAnimationFrame(pump));
-
-    // Be a good citizen: stop camera when tab is hidden or page unloads
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') stopStream();
-    });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopStream(); });
     window.addEventListener('pagehide', stopStream);
 
-    // extract the current camera frame
+    // Snapshot as JPEG
     async function captureJpegFromVideo(video, {width, height, quality = 0.92} = {}) {
-        // pick current frame size if none provided
-        const w = width  ?? video.videoWidth;
-        const h = height ?? video.videoHeight;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-
-        // If your preview is mirrored (front camera), un-mirror for the file:
-        // ctx.scale(-1, 1); ctx.drawImage(video, -w, 0, w, h); ctx.setTransform(1,0,0,1,0,0);
-        ctx.drawImage(video, 0, 0, w, h);
-
-        // Prefer Blob (smaller & uploadable). Fallback to dataURL if needed.
-        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
-        return blob; // type 'image/jpeg'
+      const w = width  ?? video.videoWidth;
+      const h = height ?? video.videoHeight;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const cctx = c.getContext('2d');
+      // If your preview is mirrored and you want un-mirrored files, flip here:
+      // cctx.scale(-1, 1); cctx.drawImage(video, -w, 0, w, h); cctx.setTransform(1,0,0,1,0,0);
+      cctx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', quality));
+      return blob;
     }
-
-    // Example: take a snapshot and download it
     async function downloadSnapshot(video) {
-        const blob = await captureJpegFromVideo(video, {quality: 0.92});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        a.href = url;
-        a.download = `frame-${ts}.jpg`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+      const blob = await captureJpegFromVideo(video, { quality: 0.92 });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url; a.download = `frame-${ts}.jpg`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
     }
+    document.getElementById('snap').addEventListener('click', () => downloadSnapshot(video));
 
-    document.getElementById('snap').addEventListener('click', () => downloadSnapshot(preview));
+    // Expose editor helpers globally if you want to call them from elsewhere:
+    window.insertText = insertText;
+    window.pressKey = pressKey;
+    window.focusEditor = focusEditor;
   </script>
 </body>
 </html>
