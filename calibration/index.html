@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera + Homography Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    #vidWrap { position: relative; width: 100%; max-width: 680px; }
+    video { width: 100%; border-radius: 12px; display: block; }
+    canvas#overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: auto; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+    select, button { padding: .5rem .75rem; }
+    #status { font-size: .9rem; opacity: .75; }
+  </style>
+</head>
+<body>
+  <h1>Camera → Homography Calibration <span id="status">(loading OpenCV…)</span></h1>
+
+  <div class="row">
+    <button id="start">Start (rear camera)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
+  </div>
+
+  <div id="vidWrap">
+    <video id="preview" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <!-- 1) Define Module BEFORE loading OpenCV -->
+  <script defer>
+    window.Module = {
+      onRuntimeInitialized() {
+        window.__cvReady = true;
+        const s = document.getElementById('status');
+        if (s) s.textContent = '(OpenCV ready)';
+        console.log('OpenCV.js ready');
+      }
+    };
+  </script>
+
+  <!-- 2) Load OpenCV and your app with DEFER (keeps order, waits for DOM) -->
+  <script defer src="https://docs.opencv.org/4.x/opencv.js"></script>
+  <script defer src="surfaceDetection.js"></script>
+</body>
+</html>

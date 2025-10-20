@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys - All Digits Stable Proportional Fingertip ROI</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* CSS is retained from your working file */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label { font: inherit; }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+    }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+
+    .stage-wrap {
+      position: relative;
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    #stage { position: relative; background: #111; }
+    #video, #overlay { position: absolute; left: 0; top: 0; }
+
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center;
+    }
+    .log-panel {
+        margin-top: 15px;
+        background: #f6f6f6;
+        padding: 15px;
+        border-radius: 8px;
+        color: #1f2937;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
+</head>
+<body>
+  <header><strong>HoloKeys All Digits Stable ROI (V6)</strong></header>
+
+  <main class="container">
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      <button id="btnDetectAndSave" disabled>Detect &amp; Save</button>
+      <span class="status" id="status">Idle</span>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+
+    <div class="log-panel">
+        <strong>Refined Contact Points (All 5 Digits)</strong>
+        <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 60px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
+            Tracking not active.
+        </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import {
+      HandLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+    // --- CONFIGURATION ---
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    
+    // UPDATED: Mappings for all five digits
+    const FINGERTIP_MAP = {
+        4: { name: "Thumb", base: 3, color: '#3b82f6', contactColor: '#fef08a' },     // Thumb Tip (4) -> Base (3)
+        8: { name: "Index", base: 7, color: '#22c55e', contactColor: '#fde047' },     // Index Tip (8) -> DIP (7)
+        12: { name: "Middle", base: 11, color: '#22d3ee', contactColor: '#ef4444' },   // Middle Tip (12) -> DIP (11)
+        16: { name: "Ring", base: 15, color: '#f97316', contactColor: '#6366f1' },    // Ring Tip (16) -> DIP (15)
+        20: { name: "Pinky", base: 19, color: '#ec4899', contactColor: '#a78bfa' }    // Pinky Tip (20) -> DIP (19)
+    };
+    
+    // Bounding Box Parameters
+    const WIDTH_MARGIN = 15; 
+    const EXTENSION_FACTOR = 0.5; 
+
+    // DOM
+    const stageWrap = document.getElementById("stageWrap");
+    const stage     = document.getElementById("stage");
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const statusEl  = document.getElementById("status");
+    const btnStart  = document.getElementById("btnStart");
+    const chkLive   = document.getElementById("chkLive");
+    const contactLog = document.getElementById("contactLog");
+    const toolbar   = document.getElementById("toolbar");
+
+    // Model and State
+    let filesetResolver = null;
+    let handLandmarker = null;
+    let drawer = null;
+    let rafId = null; 
+    let lastGoodResult = null; // Stores the last successful detection for stability
+
+    // ---- Utility Functions ----
+    function setExactStageSize(w, h) {
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
+      video.style.width  = w + "px";
+      video.style.height = h + "px";
+      overlay.style.width  = w + "px";
+      overlay.style.height = h + "px";
+      overlay.width  = w; 
+      overlay.height = h;
+      stageWrap.style.width  = w + "px";
+      stageWrap.style.height = h + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized = parseInt(stage.style.width) === vw && parseInt(stage.style.height) === vh;
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
+
+    function clearOverlay() {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20;
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
+      const scale = Math.min(1, availableW / vw, availableH / vh);
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+
+    // ---- Directional and Proportional ROI Logic (Unchanged) ----
+    function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
+      if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
+      
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
+
+      const w = overlay.width;
+      const h = overlay.height;
+
+      const pTip = { x: tip.x * w, y: tip.y * h };
+      const pBase = { x: base.x * w, y: base.y * h };
+
+      const vecX = pTip.x - pBase.x;
+      const vecY = pTip.y - pBase.y;
+      const length = Math.sqrt(vecX * vecX + vecY * vecY);
+
+      if (length < 1) return null; 
+
+      const unitX = vecX / length; 
+      const unitY = vecY / length; 
+      
+      const proportionalExtension = length * EXTENSION_FACTOR;
+
+      const pContact = { 
+          x: pTip.x + unitX * proportionalExtension, 
+          y: pTip.y + unitY * proportionalExtension 
+      };
+
+      const pTipLeft = { x: pTip.x - unitY * WIDTH_MARGIN, y: pTip.y + unitX * WIDTH_MARGIN };
+      const pTipRight = { x: pTip.x + unitY * WIDTH_MARGIN, y: pTip.y - unitX * WIDTH_MARGIN };
+      
+      const pContactLeft = { x: pContact.x - unitY * WIDTH_MARGIN, y: pContact.y + unitX * WIDTH_MARGIN };
+      const pContactRight = { x: pContact.x + unitY * WIDTH_MARGIN, y: pContact.y - unitX * WIDTH_MARGIN };
+      
+      const pBaseLeft = { x: pBase.x - unitY * WIDTH_MARGIN, y: pBase.y + unitX * WIDTH_MARGIN };
+      const pBaseRight = { x: pBase.x + unitY * WIDTH_MARGIN, y: pBase.y - unitX * WIDTH_MARGIN };
+
+      const allX = [pBaseLeft.x, pBaseRight.x, pContactLeft.x, pContactRight.x];
+      const allY = [pBaseLeft.y, pBaseRight.y, pContactLeft.y, pContactRight.y];
+
+      const minX = Math.min(...allX);
+      const maxX = Math.max(...allX);
+      const minY = Math.min(...allY);
+      const maxY = Math.max(...allY);
+
+      const boxWidth = maxX - minX;
+      const boxHeight = maxY - minY;
+
+      const contactX = pContact.x; 
+      const contactY = pContact.y; 
+
+      return { x: minX, y: minY, w: boxWidth, h: boxHeight, contactX: contactX, contactY: contactY };
+    }
+
+    function drawROI(roiData, boxColor, contactColor) {
+        octx.strokeStyle = boxColor;
+        octx.lineWidth = 3;
+        octx.strokeRect(roiData.x, roiData.y, roiData.w, roiData.h);
+        
+        octx.fillStyle = contactColor; 
+        octx.beginPath();
+        octx.arc(roiData.contactX, roiData.contactY, 10, 0, 2 * Math.PI);
+        octx.fill();
+        octx.strokeStyle = '#111'; 
+        octx.lineWidth = 2;
+        octx.stroke();
+    }
+
+    // ---- Drawing and Detection Loop (Stability Fix - Unchanged) ----
+    function drawResults(result) {
+      
+      // Update the stored result only if detection was successful
+      if (result?.landmarks?.length) {
+          lastGoodResult = result;
+      }
+      
+      const resultToDraw = lastGoodResult;
+
+      clearOverlay();
+      const logMessages = [];
+
+      if (!resultToDraw?.landmarks?.length) {
+          contactLog.innerHTML = 'No hands detected.';
+          return;
+      }
+
+      for (const handLandmarks of resultToDraw.landmarks) {
+        // Draw MediaPipe skeleton
+        drawer.drawConnectors(handLandmarks, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2, color: '#eee' });
+        drawer.drawLandmarks(handLandmarks, { radius: 3, color: '#aaa', fill: false });
+        
+        // Loop through ALL five digits
+        for (const tipIndex in FINGERTIP_MAP) {
+            const config = FINGERTIP_MAP[tipIndex];
+            const roiData = calculateFingertipROI(handLandmarks, parseInt(tipIndex), config.base);
+
+            if (roiData) {
+                // 1. Draw the dynamic ROI box and contact point
+                drawROI(roiData, config.color, config.contactColor);
+
+                // 2. Log the final contact point
+                logMessages.push(
+                    `${config.name} (H${resultToDraw.landmarks.indexOf(handLandmarks) + 1}): X:${roiData.contactX.toFixed(0)}, Y:${roiData.contactY.toFixed(0)}`
+                );
+            }
+        }
+      }
+
+      // Update the log display
+      contactLog.innerHTML = logMessages.map(msg => `<div>${msg}</div>`).join('');
+    }
+
+    // ---- Camera, Live Loop, Model Init, UI Wiring (Identical) ----
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+
+      statusEl.textContent = "Camera ready";
+    }
+
+    window.addEventListener("resize", fitStageToScreen);
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
+    });
+
+    let lastVideoTime = -1;
+    function startLive() {
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; return; }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo();
+          const now = performance.now();
+          const videoTime = video.currentTime;
+
+          let result = null;
+          if (videoTime !== lastVideoTime) {
+              result = handLandmarker.detectForVideo(video, now);
+              lastVideoTime = videoTime;
+          }
+          drawResults(result);
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    async function initModel() {
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      filesetResolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      drawer = new DrawingUtils(octx);
+      statusEl.textContent = "Model ready";
+    }
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await Promise.all([initModel(), startCamera()]);
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
+    });
+
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+        clearOverlay(); 
+      }
+    });
+  </script>
+</body>
+</html>

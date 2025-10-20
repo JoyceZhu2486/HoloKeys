@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys V11: Tri-Method Fingertip Tracking</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* Base CSS Styles for clean, responsive layout */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    /* Toolbar for controls */
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label, .toolbar select { font: inherit; }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+    }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+
+    /* Video and Canvas container */
+    .stage-wrap {
+      position: relative;
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    #stage { position: relative; background: #111; }
+    #video, #overlay { position: absolute; left: 0; top: 0; }
+
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center;
+    }
+
+    /* Log Panel for tracking data */
+    .log-panel {
+        margin-top: 15px;
+        background: #f6f6f6;
+        padding: 15px;
+        border-radius: 8px;
+        color: #1f2937;
+    }
+    .indicator-text {
+        color: #059669; /* Success color for Centroid */
+        font-weight: bold;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
+</head>
+<body>
+  <header><strong>HoloKeys V11: Tri-Method Fingertip Tracking</strong></header>
+
+  <main class="container">
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      
+      <label for="selectMethod">Fingertip Method:</label>
+      <select id="selectMethod">
+          <option value="PIXEL_CENTROID" selected>Method 4: Pixel Centroid (Optimal)</option>
+          <option value="PROJECTION">Method 2: Proportional Projection</option>
+          <option value="LANDMARK_TIP">Method 1: Landmark Tip (Baseline)</option>
+      </select>
+      
+      <label>Threshold (0-255): <input type="number" id="inputThreshold" value="50" min="0" max="255" style="width: 50px;"></label>
+      
+      <span class="status" id="status">Idle</span>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+
+    <div class="log-panel">
+        <strong>Refined Fingertip Position Log</strong>
+        <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
+            Tracking not active.
+        </div>
+    </div>
+  </main>
+  
+  <canvas id="tempCanvas" style="display: none;"></canvas>
+
+  <script type="module">
+    import {
+      HandLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+    // --- CONFIGURATION & CONSTANTS ---
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    
+    // Mapping MediaPipe landmark indices (tip and knuckle base) - Color Settings Retained
+    const FINGERTIP_MAP = {
+        4: { name: "Thumb", base: 3, color: '#3b82f6', contactColor: '#fef08a' },
+        8: { name: "Index", base: 7, color: '#22c55e', contactColor: '#fde047' },
+        12: { name: "Middle", base: 11, color: '#22d3ee', contactColor: '#ef4444' },
+        16: { name: "Ring", base: 15, color: '#f97316', contactColor: '#6366f1' },
+        20: { name: "Pinky", base: 19, color: '#ec4899', contactColor: '#a78bfa' }
+    };
+    
+    const PROPORTIONAL_WIDTH_FACTOR = 0.5; // ROI width margin (Dynamic Sizing Retained)
+    const EXTENSION_FACTOR = 0.5;          // Projection length (M2 & M4 Fallback)
+    const MIN_PIXEL_COUNT = 50;            // Minimum pixel mass required for a stable centroid
+
+    // DOM Elements
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const tempCanvas = document.getElementById("tempCanvas");
+    const tctx      = tempCanvas.getContext("2d");
+    const inputThreshold = document.getElementById("inputThreshold");
+    const selectMethod = document.getElementById("selectMethod");
+    const contactLog = document.getElementById("contactLog");
+    const statusEl = document.getElementById("status");
+    const btnStart = document.getElementById("btnStart");
+    const chkLive = document.getElementById("chkLive");
+    const stage = document.getElementById("stage");
+    const stageWrap = document.getElementById("stageWrap");
+    const toolbar = document.getElementById("toolbar");
+
+    // Model and State
+    let handLandmarker = null;
+    let drawer = null;
+    let rafId = null; 
+    let lastGoodResult = null; 
+
+    // --- Utility Functions (Sizing) ---
+    function setExactStageSize(w, h) {
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
+      overlay.width  = w; 
+      overlay.height = h;
+      stageWrap.style.width  = w + "px";
+      stageWrap.style.height = h + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized = parseInt(stage.style.width) === vw && parseInt(stage.style.height) === vh;
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
+
+    function clearOverlay() {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20;
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
+      const scale = Math.min(1, availableW / vw, availableH / vh);
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+
+    // --- ROI and Proportional Projection (M2) ---
+    function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
+      if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
+      
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
+      const w = overlay.width;
+      const h = overlay.height;
+
+      const pTip = { x: tip.x * w, y: tip.y * h };
+      const pBase = { x: base.x * w, y: base.y * h };
+
+      const vecX = pTip.x - pBase.x;
+      const vecY = pTip.y - pBase.y;
+      const length = Math.sqrt(vecX * vecX + vecY * vecY); 
+
+      if (length < 1) return null; 
+      const unitX = vecX / length; 
+      const unitY = vecY / length; 
+      
+      // Proportional Projection Point (M2)
+      const proportionalExtension = length * EXTENSION_FACTOR;
+      const pProjection = { 
+          x: pTip.x + unitX * proportionalExtension, 
+          y: pTip.y + unitY * proportionalExtension 
+      };
+
+      // Calculate ROI box coordinates with PROPORTIONAL WIDTH
+      const widthMargin = length * PROPORTIONAL_WIDTH_FACTOR; 
+
+      const allX = [pBase.x, pProjection.x];
+      const allY = [pBase.y, pProjection.y];
+
+      const sideMarginX = Math.abs(unitY * widthMargin);
+      const sideMarginY = Math.abs(unitX * widthMargin);
+
+      const minX = Math.min(...allX) - sideMarginX;
+      const maxX = Math.max(...allX) + sideMarginX;
+      const minY = Math.min(...allY) - sideMarginY;
+      const maxY = Math.max(...allY) + sideMarginY;
+
+      return { 
+          x: minX, y: minY, w: maxX - minX, h: maxY - minY, 
+          landmarkTipX: pTip.x, landmarkTipY: pTip.y, // M1 data
+          projectionX: pProjection.x, projectionY: pProjection.y // M2 data (also used for M4 fallback)
+      };
+    }
+
+    // --- Pixel Centroid Detection (Method 4) ---
+    function findCentroid(roiData, contourColor) {
+        tempCanvas.width = Math.ceil(roiData.w);
+        tempCanvas.height = Math.ceil(roiData.h);
+        const roiX = Math.floor(roiData.x);
+        const roiY = Math.floor(roiData.y);
+        const roiW = tempCanvas.width;
+        const roiH = tempCanvas.height;
+        const THRESHOLD = parseInt(inputThreshold.value, 10) || 50;
+
+        tctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, roiW, roiH);
+        const imageData = tctx.getImageData(0, 0, roiW, roiH);
+        const data = imageData.data;
+
+        let totalX = 0;
+        let totalY = 0;
+        let pixelCount = 0;
+
+        // Iterate through pixels for Grayscaling and Thresholding
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            if (gray < THRESHOLD) {
+                const x = (i / 4) % roiW;
+                const y = Math.floor((i / 4) / roiW);
+
+                totalX += x;
+                totalY += y;
+                pixelCount++;
+                
+                // Draw the contour approximation on the main overlay
+                octx.fillStyle = contourColor;
+                octx.fillRect(roiX + x, roiY + y, 1, 1);
+            }
+        }
+        
+        // Calculate Centroid or Fallback
+        if (pixelCount > MIN_PIXEL_COUNT) {
+            const refinedX = roiX + (totalX / pixelCount);
+            const refinedY = roiY + (totalY / pixelCount);
+            return { 
+                x: refinedX, y: refinedY, 
+                source: 'Centroid (M4)', 
+                pixels: pixelCount 
+            };
+        } else {
+            // Fallback to M2 (Proportional Projection)
+            return { 
+                x: roiData.projectionX, 
+                y: roiData.projectionY, 
+                source: 'Fallback (M2)', 
+                pixels: pixelCount 
+            };
+        }
+    }
+
+    // --- Drawing Functions ---
+    function drawROIBox(roiData, boxColor) {
+        octx.strokeStyle = boxColor;
+        octx.lineWidth = 3;
+        octx.strokeRect(roiData.x, roiData.y, roiData.w, roiData.h);
+    }
+    
+    function drawFinalTip(point, contactColor, name) {
+        octx.fillStyle = contactColor; 
+        octx.beginPath();
+        octx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
+        octx.fill();
+        octx.strokeStyle = '#111'; 
+        octx.lineWidth = 2;
+        octx.stroke();
+
+        octx.fillStyle = '#fff';
+        octx.font = 'bold 14px system-ui';
+        octx.fillText(name, point.x + 15, point.y + 5);
+    }
+
+    // ---- Main Drawing and Detection Loop ----
+    function drawResults(result) {
+      const selectedMethod = selectMethod.value;
+      if (result?.landmarks?.length) {
+          lastGoodResult = result;
+      }
+      
+      const resultToDraw = lastGoodResult;
+
+      clearOverlay();
+      const logMessages = [];
+
+      if (!resultToDraw?.landmarks?.length) {
+          contactLog.innerHTML = 'No hands detected.';
+          return;
+      }
+
+      for (const handLandmarks of resultToDraw.landmarks) {
+        // Draw MediaPipe skeleton for context
+        drawer.drawConnectors(handLandmarks, HandLandmarker.HAND_CONNECTIONS, { lineWidth: 2, color: '#eee' });
+        drawer.drawLandmarks(handLandmarks, { radius: 3, color: '#aaa', fill: false });
+        
+        // Process each digit
+        for (const tipIndex in FINGERTIP_MAP) {
+            const config = FINGERTIP_MAP[tipIndex];
+            const roiData = calculateFingertipROI(handLandmarks, parseInt(tipIndex), config.base);
+
+            if (!roiData) continue;
+            
+            let finalTip = null;
+            let pixels = 0; 
+            
+            if (selectedMethod === 'LANDMARK_TIP') {
+                // Method 1: Raw Landmark Tip (Baseline)
+                finalTip = { 
+                    x: roiData.landmarkTipX, 
+                    y: roiData.landmarkTipY, 
+                    source: 'Landmark Tip (M1)', 
+                };
+            } 
+            
+            else if (selectedMethod === 'PROJECTION') {
+                // Method 2: Proportional Projection
+                finalTip = { 
+                    x: roiData.projectionX, 
+                    y: roiData.projectionY, 
+                    source: 'Projection (M2)', 
+                };
+            }
+            
+            else if (selectedMethod === 'PIXEL_CENTROID') {
+                // Method 4: Centroid Pixel Refinement (Optimal)
+                drawROIBox(roiData, config.color); // Draw the dynamic ROI box
+                
+                const centroidResult = findCentroid(roiData, config.color);
+                finalTip = centroidResult;
+                pixels = centroidResult.pixels;
+            }
+            
+            // Draw the final marker and log the result
+            if (finalTip) {
+                drawFinalTip(finalTip, config.contactColor, config.name);
+
+                const statusClass = finalTip.source.includes('Centroid') ? 'indicator-text' : '';
+
+                logMessages.push(
+                    `<div>${config.name} (<span class="${statusClass}">${finalTip.source}</span>): X:${finalTip.x.toFixed(1)}, Y:${finalTip.y.toFixed(1)} [P:${pixels}]</div>`
+                );
+            }
+        }
+      }
+
+      contactLog.innerHTML = logMessages.join('');
+    }
+
+    // --- MediaPipe / Camera Initialization and Loop (Unchanged) ---
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+      statusEl.textContent = "Camera ready";
+    }
+
+    window.addEventListener("resize", fitStageToScreen);
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
+    });
+
+    let lastVideoTime = -1;
+    function startLive() {
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; clearOverlay(); return; }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo();
+          const now = performance.now();
+          const videoTime = video.currentTime;
+
+          let result = null;
+          if (videoTime !== lastVideoTime) {
+              result = handLandmarker.detectForVideo(video, now);
+              lastVideoTime = videoTime;
+          }
+          drawResults(result);
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    async function initModel() {
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      
+      let resolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      drawer = new DrawingUtils(octx);
+      statusEl.textContent = "Model ready";
+    }
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await initModel(); 
+        await startCamera();
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
+    });
+
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+        clearOverlay();
+      }
+    });
+  </script>
+</body>
+</html>
