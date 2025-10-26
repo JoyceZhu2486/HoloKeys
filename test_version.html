@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys V18: RGB+HSL Gradient Search & Proportional Factor 3.5</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* Base CSS Styles for clean, responsive layout */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    /* Toolbar for controls */
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label, .toolbar select, .toolbar input[type="number"] { font: inherit; }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+    }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+
+    /* Video and Canvas container */
+    .stage-wrap {
+      position: relative;
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+
+    #stage { position: relative; background: #111; }
+    #video, #overlay { position: absolute; left: 0; top: 0; }
+
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center;
+    }
+
+    /* Log Panel for tracking data */
+    .log-panel {
+        margin-top: 15px;
+        background: #f6f6f6;
+        padding: 15px;
+        border-radius: 8px;
+        color: #1f2937;
+    }
+    .log-hand-label {
+        font-weight: bold;
+        margin-top: 8px;
+        margin-bottom: 4px;
+        display: block;
+        border-bottom: 1px dashed #ccc;
+        padding-bottom: 2px;
+    }
+
+    /* Status text colors for log */
+    /* M4/Centroid colors are removed, focusing on M5/Gradient and Fallback/M2 */
+    .fallback-text { color: #dc2626; font-weight: bold; } /* M5 Fallback: Red */
+    .default-text { color: #f97316; font-weight: bold; } /* M1/M2: Orange */
+    .gradient-text { color: #3b82f6; font-weight: bold; } /* M5 Gradient: Blue */
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
+</head>
+<body>
+  <header><strong>HoloKeys V18: RGB+HSL Gradient Search & Proportional Factor 3.5</strong></header>
+
+  <main class="container">
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      
+      <label for="selectMethod">Fingertip Method:</label>
+      <select id="selectMethod">
+          <option value="GRADIENT_CHANGE" selected>Method 5: Color Change Gradient (RGB+HSL)</option>
+          <option value="PROJECTION">Method 2: Proportional Projection</option>
+          <option value="LANDMARK_TIP">Method 1: Landmark Tip (Baseline)</option>
+      </select>
+      
+      <label>M5 Grad. Thresh: <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width: 50px;"></label>
+      <label>Proportion Factor: <input type="number" step="0.5" id="inputExtensionFactor" value="3.5" min="0.1" max="5.0" style="width: 50px;"></label>
+
+      <span class="status" id="status">Idle</span>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+
+    <div class="log-panel">
+        <strong>Refined Fingertip Position Log</strong>
+        <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
+            Tracking not active.
+        </div>
+    </div>
+  </main>
+  
+  <canvas id="tempCanvas" style="display: none;"></canvas>
+
+  <script type="module">
+    import { HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js";
+
+    // --- CONFIGURATION & CONSTANTS ---
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    
+    // Mapping MediaPipe landmark indices
+    const FINGERTIP_MAP = {
+        4: { name: "Thumb", base: 3, color: '#3b82f6' }, 
+        8: { name: "Index", base: 7, color: '#22c55e' },
+        12: { name: "Middle", base: 11, color: '#22d3ee' },
+        16: { name: "Ring", base: 15, color: '#f97316' },
+        20: { name: "Pinky", base: 19, color: '#ec4899' }
+    };
+    
+    // Explicit colors for visual distinction
+    const FALLBACK_COLOR = '#dc2626';       // Red (M5 Fallback to M2)
+    const GRADIENT_COLOR = '#3b82f6';       // Blue (M5 Success)
+    const DEFAULT_TIP_COLOR = '#f97316';    // Orange (M1/M2)
+    
+    // M5 Constants
+    const M5_MAX_SEARCH_DIST = 60; 
+    const M5_LOOKAHEAD = 5;       
+    const M5_MIN_SUCCESS_DIST = 5; 
+
+    // DOM Elements
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const tempCanvas = document.getElementById("tempCanvas");
+    const tctx      = tempCanvas.getContext("2d");
+    const inputGradientThreshold = document.getElementById("inputGradientThreshold");
+    const inputExtensionFactor = document.getElementById("inputExtensionFactor"); // New/Updated input
+    const selectMethod = document.getElementById("selectMethod");
+    const contactLog = document.getElementById("contactLog");
+    const statusEl = document.getElementById("status");
+    const btnStart = document.getElementById("btnStart");
+    const chkLive = document.getElementById("chkLive");
+    const stage = document.getElementById("stage");
+    const stageWrap = document.getElementById("stageWrap");
+    const toolbar = document.getElementById("toolbar");
+
+    // Model and State
+    let handLandmarker = null;
+    let lastGoodResult = null; 
+    let rafId = null; 
+
+    // --- Utility Functions (Sizing & Pixels) ---
+    function setExactStageSize(w, h) {
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
+      overlay.width  = w; 
+      overlay.height = h;
+      stageWrap.style.width  = w + "px";
+      stageWrap.style.height = h + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized = parseInt(stage.style.width) === vw && parseInt(stage.style.height) === vh;
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
+
+    function clearOverlay() {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20;
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
+      const scale = Math.min(1, availableW / vw, availableH / vh);
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+
+    // --- Color Difference Functions (RGB + HSL) ---
+
+    /**
+     * Converts RGB (0-255) to HSL (H: 0-360, S: 0-1, L: 0-1).
+     */
+    function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+
+        if (max === min) {
+            h = s = 0; // achromatic
+        } else {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+
+        // Return H (0-360), S (0-1), L (0-1)
+        return [h * 360, s, l];
+    }
+
+    /**
+     * Calculates a combined difference score for two colors (RGB and HSL).
+     * @returns A difference score normalized to a 0-255 range.
+     */
+    function calculateColorDifference(r1, g1, b1, r2, g2, b2) {
+        // 1. Euclidean distance in RGB space (normalized to 0-1)
+        const diffR = (r1 - r2) / 255;
+        const diffG = (g1 - g2) / 255;
+        const diffB = (b1 - b2) / 255;
+        const rgbDist = Math.sqrt(diffR * diffR + diffG * diffG + diffB * diffB);
+
+        // 2. Difference in HSL
+        const [h1, s1, l1] = rgbToHsl(r1, g1, b1);
+        const [h2, s2, l2] = rgbToHsl(r2, g2, b2);
+        
+        // Hue difference (circular 0-360)
+        let diffH = Math.abs(h1 - h2);
+        if (diffH > 180) diffH = 360 - diffH;
+        diffH /= 180; // Normalize max difference to 2
+
+        // Saturation and Luminosity difference (normalized to 0-1)
+        const diffS = Math.abs(s1 - s2);
+        const diffL = Math.abs(l1 - l2);
+
+        // 3. Combined score (Weighting: RGB 50%, H 25%, S 12.5%, L 12.5%)
+        let combinedScore = (rgbDist * 0.5) + (diffH * 0.25) + (diffS * 0.125) + (diffL * 0.125);
+        
+        // Normalize the score to a 0-255 range for threshold comparison
+        return combinedScore * 255;
+    }
+
+
+    // --- Projection Vector Calculation (M2, M5 support) ---
+    function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
+      if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
+      
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
+      const w = overlay.width;
+      const h = overlay.height;
+
+      const pTip = { x: tip.x * w, y: tip.y * h };
+      const pBase = { x: base.x * w, y: base.y * h };
+
+      const vecX = pTip.x - pBase.x;
+      const vecY = pTip.y - pBase.y;
+      const length = Math.sqrt(vecX * vecX + vecY * vecY); 
+      
+      // Get adjustable factor, default is 3.5
+      const EXTENSION_FACTOR = parseFloat(inputExtensionFactor.value) || 3.5; 
+
+      if (length < 1) return null; 
+      const unitX = vecX / length; 
+      const unitY = vecY / length; 
+      
+      // Proportional Projection Point (M2)
+      const proportionalExtension = length * EXTENSION_FACTOR;
+      const pProjection = { 
+          x: pTip.x + unitX * proportionalExtension, 
+          y: pTip.y + unitY * proportionalExtension 
+      };
+      
+      // M4 ROI data is now unused but the structure remains for projection logic
+      const PROPORTIONAL_WIDTH_FACTOR = 0.5;
+      const widthMargin = length * PROPORTIONAL_WIDTH_FACTOR; 
+
+      const allX = [pBase.x, pProjection.x];
+      const allY = [pBase.y, pProjection.y];
+
+      const sideMarginX = Math.abs(unitY * widthMargin);
+      const sideMarginY = Math.abs(unitX * widthMargin);
+
+      const minX = Math.min(...allX) - sideMarginX;
+      const maxX = Math.max(...allX) + sideMarginX;
+      const minY = Math.min(...allY) - sideMarginY;
+      const maxY = Math.max(...allY) + sideMarginY;
+
+      return { 
+          // M1 data
+          landmarkTipX: pTip.x, landmarkTipY: pTip.y, 
+          // M2 data (used for M5 fallback)
+          projectionX: pProjection.x, projectionY: pProjection.y,
+          // M5 vector data
+          tipX: pTip.x, tipY: pTip.y,
+          unitX: unitX, unitY: unitY
+      };
+    }
+
+    // --- Gradient Search Detection (Method 5) ---
+    function findGradientTip(roiData) {
+        const videoW = video.videoWidth;
+        const videoH = video.videoHeight;
+        const GRADIENT_THRESHOLD = parseInt(inputGradientThreshold.value, 10) || 30;
+
+        // Draw the full frame to the hidden canvas to get pixel data
+        tempCanvas.width = videoW;
+        tempCanvas.height = videoH;
+        tctx.drawImage(video, 0, 0, videoW, videoH);
+        const imageData = tctx.getImageData(0, 0, videoW, videoH);
+        const data = imageData.data;
+
+        const { tipX, tipY, unitX, unitY, projectionX, projectionY } = roiData;
+        let finalPoint = null;
+
+        // Draw the projection line start
+        octx.strokeStyle = GRADIENT_COLOR;
+        octx.lineWidth = 2;
+        octx.setLineDash([5, 5]); 
+        octx.beginPath();
+        octx.moveTo(tipX, tipY);
+        
+        // 1. Iterate outwards along the projection vector
+        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) {
+            const currentX = Math.round(tipX + unitX * dist);
+            const currentY = Math.round(tipY + unitY * dist);
+
+            // Bounds check
+            if (currentX < 0 || currentX >= videoW || currentY < 0 || currentY >= videoH) break;
+
+            const lookAheadX = Math.round(tipX + unitX * (dist + M5_LOOKAHEAD));
+            const lookAheadY = Math.round(tipY + unitY * (dist + M5_LOOKAHEAD));
+
+            // Bounds check for look-ahead
+            if (lookAheadX < 0 || lookAheadX >= videoW || lookAheadY < 0 || lookAheadY >= videoH) {
+                break; 
+            }
+
+            // Get colors for current and look-ahead points
+            const currentIdx = (currentY * videoW + currentX) * 4;
+            const lookAheadIdx = (lookAheadY * videoW + lookAheadX) * 4;
+
+            if (currentIdx + 2 >= data.length || lookAheadIdx + 2 >= data.length) break;
+
+            const r1 = data[currentIdx], g1 = data[currentIdx + 1], b1 = data[currentIdx + 2];
+            const r2 = data[lookAheadIdx], g2 = data[lookAheadIdx + 1], b2 = data[lookAheadIdx + 2];
+
+            // Calculate the combined RGB+HSL color difference
+            const gradient = calculateColorDifference(r1, g1, b1, r2, g2, b2);
+
+            // 2. Check gradient against threshold
+            if (gradient > GRADIENT_THRESHOLD) {
+                // Color change detected (finger to surface/background)
+                if (dist > M5_MIN_SUCCESS_DIST) {
+                    finalPoint = { x: currentX, y: currentY, source: 'Gradient (M5)' };
+                    break;
+                }
+            }
+        }
+        
+        // 3. Fallback Logic
+        if (!finalPoint) {
+            // If no distinct edge was found, fall back to M2 Projection
+            finalPoint = { 
+                x: projectionX, 
+                y: projectionY, 
+                source: 'Fallback (M2)', 
+            };
+            // Draw line to the M2 fallback point
+            octx.lineTo(finalPoint.x, finalPoint.y);
+        } else {
+            // Draw line to the successful M5 point
+            octx.lineTo(finalPoint.x, finalPoint.y);
+        }
+
+        octx.stroke();
+        octx.setLineDash([]); // Reset line style
+
+        return finalPoint;
+    }
+
+
+    // --- Drawing Functions ---
+    // drawROIBox is no longer necessary as M4 is removed.
+    
+    function drawFinalTip(point, name, selectedMethod) {
+        let markerColor = DEFAULT_TIP_COLOR; 
+
+        // Determine color based on selected method and calculated source
+        if (selectedMethod === 'GRADIENT_CHANGE') {
+            markerColor = point.source.includes('Fallback') ? FALLBACK_COLOR : GRADIENT_COLOR;
+        }
+
+        octx.fillStyle = markerColor; 
+        octx.beginPath();
+        octx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
+        octx.fill();
+        octx.strokeStyle = '#111'; 
+        octx.lineWidth = 2;
+        octx.stroke();
+
+        octx.fillStyle = '#fff';
+        octx.font = 'bold 14px system-ui';
+        octx.fillText(name, point.x + 15, point.y + 5);
+    }
+
+    // ---- Main Drawing and Detection Loop ----
+    function drawResults(result) {
+      const selectedMethod = selectMethod.value;
+      if (result?.landmarks?.length) {
+          lastGoodResult = result;
+      }
+      
+      const resultToDraw = lastGoodResult;
+
+      clearOverlay();
+      const logMessages = [];
+
+      if (!resultToDraw?.landmarks?.length) {
+          contactLog.innerHTML = 'No hands detected.';
+          return;
+      }
+
+      // Loop through each hand detected
+      resultToDraw.landmarks.forEach((handLandmarks, handIndex) => {
+        const handLabel = `Hand ${handIndex + 1}`;
+        logMessages.push(`<span class="log-hand-label">${handLabel}</span>`);
+
+        // Process each digit
+        for (const tipIndex in FINGERTIP_MAP) {
+            const config = FINGERTIP_MAP[tipIndex];
+            const roiData = calculateFingertipROI(handLandmarks, parseInt(tipIndex), config.base);
+
+            if (!roiData) continue;
+            
+            let finalTip = null;
+            
+            if (selectedMethod === 'LANDMARK_TIP') {
+                finalTip = { 
+                    x: roiData.landmarkTipX, 
+                    y: roiData.landmarkTipY, 
+                    source: 'Landmark Tip (M1)', 
+                };
+            } 
+            
+            else if (selectedMethod === 'PROJECTION') {
+                finalTip = { 
+                    x: roiData.projectionX, 
+                    y: roiData.projectionY, 
+                    source: 'Projection (M2)', 
+                };
+            }
+
+            else if (selectedMethod === 'GRADIENT_CHANGE') {
+                 // Method 5: Color Change Gradient (with M2 fallback)
+                 finalTip = findGradientTip(roiData);
+            }
+            
+            // Draw the final marker and log the result
+            if (finalTip) {
+                drawFinalTip(finalTip, config.name, selectedMethod);
+
+                const statusClass = finalTip.source.includes('Fallback') ? 'fallback-text'
+                                  : finalTip.source.includes('Gradient') ? 'gradient-text'
+                                  : 'default-text';
+
+                logMessages.push(
+                    `<div>- ${config.name} (<span class="${statusClass}">${finalTip.source}</span>): X:${finalTip.x.toFixed(1)}, Y:${finalTip.y.toFixed(1)}</div>`
+                );
+            }
+        }
+      });
+
+      contactLog.innerHTML = logMessages.join('');
+    }
+
+    // --- MediaPipe / Camera Initialization and Loop ---
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+      statusEl.textContent = "Camera ready";
+    }
+
+    window.addEventListener("resize", fitStageToScreen);
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
+    });
+
+    let lastVideoTime = -1;
+    function startLive() {
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { rafId = null; statusEl.textContent = "Camera ready"; clearOverlay(); return; }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo();
+          const now = performance.now();
+          const videoTime = video.currentTime;
+
+          let result = null;
+          if (videoTime !== lastVideoTime) {
+              result = handLandmarker.detectForVideo(video, now);
+              lastVideoTime = videoTime;
+          }
+          drawResults(result);
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    async function initModel() {
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      
+      const { FilesetResolver } = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js");
+
+      let resolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      statusEl.textContent = "Model ready";
+    }
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await initModel(); 
+        await startCamera();
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
+    });
+
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+        clearOverlay();
+      }
+    });
+  </script>
+</body>
+</html>
