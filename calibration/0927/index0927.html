@@ -31,11 +31,29 @@
     <select id="cameraSelect" title="Choose camera"></select>
     <button id="stop" disabled>Stop</button>
     <button id="snap">Capture JPG</button>
+
     <label class="pill"><input type="checkbox" id="live" checked> Live detect</label>
     <label class="pill"><input type="checkbox" id="showHands" checked> Show landmarks</label>
     <label class="pill"><input type="checkbox" id="showDebug" checked> Show F/J X</label>
     <label class="pill"><input type="checkbox" id="blackMode"> Black screen</label>
     <button id="recalibrate" class="pill">Recalibrate</button>
+
+    <!-- Height slider + Default -->
+    <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
+      Height
+      <input type="range" id="height" min="0.60" max="1.80" step="0.02" value="1.00">
+      <span id="heightVal">100%</span>
+    </label>
+    <button id="heightDefault" class="pill">Default</button>
+
+    <!-- Top/Bottom ratio slider + Default -->
+    <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
+      Top/Bottom
+      <input type="range" id="ratio" min="0.40" max="1.40" step="0.02" value="0.65">
+      <span id="ratioVal">0.65</span>
+    </label>
+    <button id="ratioDefault" class="pill">Default</button>
+
     <span class="sep"></span>
     <span class="pill" id="status">Idle</span>
   </div>

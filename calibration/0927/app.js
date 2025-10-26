@@ -23,6 +23,14 @@ const blackChk = document.getElementById('blackMode');
 const recalBtn = document.getElementById('recalibrate');
 const statusEl = document.getElementById('status');
 
+const heightSlider = document.getElementById('height');
+const heightVal    = document.getElementById('heightVal');
+const ratioSlider  = document.getElementById('ratio');
+const ratioVal     = document.getElementById('ratioVal');
+
+const heightDefaultBtn = document.getElementById('heightDefault');
+const ratioDefaultBtn  = document.getElementById('ratioDefault');
+
 const frameCanvas = document.getElementById('frame');
 const frameCtx    = frameCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -36,9 +44,6 @@ const F_COL = 3;             // index of 'F' in home row (0-based across 10)
 const J_COL = 6;             // index of 'J' in home row
 
 // Visual keyboard definition (bottom → top). Variable-width keys supported.
-// Each row: { offset: <left padding in "unit" widths>, keys: [{label, w}] }.
-// Units are row-local; we normalize to [0..1] per row so they fit the quad.
-// Visual keyboard (bottom → top). Variable-width keys supported.
 // Bottom → Top (mirrored view): Number row at the very bottom, Space/modifiers at the top.
 const ROWS = [
   // ── 0: Number row (bottommost)
@@ -81,7 +86,6 @@ const ROWS = [
   },
 
   // ── 4: Modifiers + Space + Arrows (topmost)
-  // (Arrows are rendered inline at the far right for simplicity.)
   { offset: 0,
     keys: [
       {label:'fn',w:1.2},{label:'⌃',w:1.25},{label:'⌥',w:1.5},{label:'⌘',w:1.75},
@@ -92,11 +96,8 @@ const ROWS = [
   },
 ];
 
-
-
-// Tuning
+// Tuning (defaults)
 const VERTICAL_SCALE = 1.0;  // vertical pitch relative to horizontal pitch
-const TOP_SHRINK = 0.65;     // width_top / width_bottom
 const MIN_SEP_PX = 80;       // minimum F–J separation to accept calibration
 
 // ---------- State ----------
@@ -111,6 +112,25 @@ let calibStartMs = null;
 
 let handLandmarker = null;
 let drawer = null;
+
+// User-adjustable scales (with defaults)
+let heightScale = 1.00;   // 1.00 = default height
+let topShrink   = 0.65;   // width_top / width_bottom (0.65 default trapezoid)
+
+// ---------- UI setters ----------
+function setHeightScale(s) {
+  const v = Math.max(0.3, Math.min(3.0, Number(s) || 1.0)); // clamp
+  heightScale = v;
+  if (heightVal) heightVal.textContent = `${Math.round(v * 100)}%`;
+  if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
+}
+
+function setTopShrink(s) {
+  const v = Math.max(0.3, Math.min(1.5, Number(s) || 0.65)); // clamp
+  topShrink = v;
+  if (ratioVal) ratioVal.textContent = v.toFixed(2);
+  if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
+}
 
 // ---------- Camera ----------
 async function listCameras() {
@@ -191,6 +211,144 @@ const vrot90=a=>({x:-a.y,y:a.x});
 const vdot=(a,b)=>a.x*b.x+a.y*b.y;
 const normalDown=dir=>{const n=vrot90(dir); return (vdot(n,{x:0,y:1})>=0)?n:vmul(n,-1);};
 
+// ----- Fingertip → key hit-testing -----
+const FINGER_TIPS  = [4, 8, 12, 16, 20];                     // thumb,index,middle,ring,pinky
+const FINGER_NAMES = ['Thumb','Index','Middle','Ring','Pinky'];
+
+// Build all key cells (their 4 corners) for the current quad
+function buildKeyCells(q) {
+  if (!q) return [];
+  const cells = [];
+  const R = ROWS.length;
+  for (let r = 0; r < R; r++) {
+    const row = ROWS[r];
+    const vBot = r / R;
+    const vTop = (r + 1) / R;
+    const totalW = (row.offset || 0) + row.keys.reduce((s,k)=>s+(k.w||1), 0);
+    let cursor = row.offset || 0;
+
+    for (const k of row.keys) {
+      const w = k.w || 1;
+      const u0 = cursor / totalW;
+      const u1 = (cursor + w) / totalW;
+      const p0 = mapRectToQuad(u0, vTop, q); // TL
+      const p1 = mapRectToQuad(u1, vTop, q); // TR
+      const p2 = mapRectToQuad(u1, vBot, q); // BR
+      const p3 = mapRectToQuad(u0, vBot, q); // BL
+      const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
+      const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
+      cells.push({ label: k.label, poly: [p0,p1,p2,p3], center:{x:cx,y:cy} });
+      cursor += w;
+    }
+  }
+  return cells;
+}
+
+function pointInConvexPolygon(pt, poly) {
+  // Works for TL→TR→BR→BL order we generate
+  let pos = false, neg = false;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i+1) % poly.length];
+    const cross = (b.x - a.x) * (pt.y - a.y) - (b.y - a.y) * (pt.x - a.x);
+    if (cross < 0) neg = true;
+    if (cross > 0) pos = true;
+    if (pos && neg) return false;
+  }
+  return true;
+}
+
+function findKeyAtPoint(cells, pt) {
+  for (const c of cells) {
+    if (pointInConvexPolygon(pt, c.poly)) return c;
+  }
+  return null;
+}
+
+// Fingertip screen coords (NOT mirrored overlay)
+function getAllFingertipsScreen(result) {
+  const tips = [];
+  if (!result || !result.landmarks || result.landmarks.length === 0) return tips;
+  const { landmarks, handednesses } = result;
+  const W = overlay.width, H = overlay.height;
+
+  // Map hand index -> 'L' / 'R'
+  const handLR = new Array(landmarks.length).fill('?');
+  if (Array.isArray(handednesses) && handednesses.length === landmarks.length) {
+    for (let i = 0; i < handednesses.length; i++) {
+      const label = handednesses[i]?.[0]?.categoryName?.toLowerCase?.() || '';
+      handLR[i] = label.includes('left') ? 'L' : label.includes('right') ? 'R' : '?';
+    }
+  } else if (landmarks.length === 2) {
+    // Fallback by x-position of index fingertips
+    const xs = landmarks.map(h => {
+      const x = h[8].x * W;
+      return MIRROR_PREVIEW ? (W - x) : x;
+    });
+    if (xs[0] <= xs[1]) { handLR[0] = 'L'; handLR[1] = 'R'; }
+    else { handLR[0] = 'R'; handLR[1] = 'L'; }
+  }
+
+  for (let hi = 0; hi < landmarks.length; hi++) {
+    for (let fi = 0; fi < FINGER_TIPS.length; fi++) {
+      const li = FINGER_TIPS[fi];
+      const lm = landmarks[hi][li];
+      let x = lm.x * W, y = lm.y * H;
+      if (MIRROR_PREVIEW) x = W - x; // convert to overlay (non-mirrored) space
+      tips.push({
+        x, y,
+        hand: handLR[hi],
+        finger: FINGER_NAMES[fi],
+        tag: `${handLR[hi]}-${FINGER_NAMES[fi]}`
+      });
+    }
+  }
+  return tips;
+}
+
+// Tiny rounded pill label
+function drawPillLabel(text, x, y) {
+  octx.save();
+  octx.font = '12px system-ui';
+  const padX = 6, padY = 3;
+  const m = octx.measureText(text);
+  const w = Math.ceil(m.width) + padX * 2;
+  const h = 16 + (padY-3); // approximate height
+  const r = 8;
+  const left = Math.round(x - w/2), top = Math.round(y - h);
+
+  octx.beginPath();
+  octx.moveTo(left + r, top);
+  octx.arcTo(left + w, top, left + w, top + h, r);
+  octx.arcTo(left + w, top + h, left, top + h, r);
+  octx.arcTo(left, top + h, left, top, r);
+  octx.arcTo(left, top, left + w, top, r);
+  octx.closePath();
+  octx.fillStyle = 'rgba(255,255,255,0.85)';
+  octx.fill();
+  octx.strokeStyle = 'rgba(0,0,0,0.25)';
+  octx.stroke();
+
+  octx.fillStyle = '#111';
+  octx.textAlign = 'center';
+  octx.textBaseline = 'middle';
+  octx.fillText(text, left + w/2, top + h/2);
+  octx.restore();
+}
+
+// Draw labels like "L-Index: F" near fingertips
+function drawFingerKeyLabels(result, q) {
+  if (!q || !result) return;
+  const cells = buildKeyCells(q);
+  if (!cells.length) return;
+  const tips = getAllFingertipsScreen(result);
+  for (const t of tips) {
+    const hit = findKeyAtPoint(cells, {x:t.x, y:t.y});
+    const label = hit ? `${t.tag}: ${hit.label}` : `${t.tag}: —`;
+    // slight offset so it doesn't sit directly on the fingertip dot
+    drawPillLabel(label, t.x, t.y - 12);
+  }
+}
+
 
 function rowTotalUnits(row) {
   return (row.offset || 0) + row.keys.reduce((s,k)=>s+(k.w||1), 0);
@@ -200,9 +358,7 @@ function uCenterInRow(row, keyLabel) {
   let cur = (row.offset || 0);
   for (const k of row.keys) {
     const w = k.w || 1;
-    if (k.label === keyLabel) {
-      return (cur + w/2) / total; // fraction [0..1] across THIS row
-    }
+    if (k.label === keyLabel) return (cur + w/2) / total;
     cur += w;
   }
   return 0.5; // fallback
@@ -215,14 +371,13 @@ function findHomeRowIndex() {
   return Math.floor(ROWS.length/2);
 }
 
-
 // ---------- Geometry solve so F/J land on HOME row centers ----------
 /**
  * Given F and J fingertip points in *screen coords* (already mirrored if preview is),
  * solve the keyboard quad so that the centers of the home-row F and J keys map
- * exactly to those points. Home row stays at v ≈ 0.5 regardless of row count.
+ * exactly to those points.
  */
- function computeQuadFromFJ(F, J){
+function computeQuadFromFJ(F, J){
   const sep = Math.hypot(J.x - F.x, J.y - F.y);
   if (sep < MIN_SEP_PX) return null;
 
@@ -239,8 +394,8 @@ function findHomeRowIndex() {
   const uJ = uCenterInRow(homeRow, 'J');
   const deltaU = uJ - uF;                      // F→J span in row-fraction
 
-  // Perspective: top vs bottom width
-  const scaleBottom = 1 / TOP_SHRINK;
+  // Perspective: top vs bottom width (user-adjustable)
+  const scaleBottom = 1 / topShrink;           // >1 means bottom wider than top
   const vHome = (homeIdx + 0.5) / R;           // exact vertical center of home row
   const tHome = 1 - vHome;                     // fraction down from top edge
   const sHome = 1 + tHome * (scaleBottom - 1); // horizontal scale at home row vs top
@@ -251,7 +406,7 @@ function findHomeRowIndex() {
   // Vertical pitch: use "one unit" width on the home row as reference
   const unitsHome = rowTotalUnits(homeRow);    // sum(offset + widths) on home row
   const oneUnitOnHome = (sHome * wTop) / unitsHome;
-  const uy = oneUnitOnHome * VERTICAL_SCALE;   // per-row vertical step
+  const uy = oneUnitOnHome * VERTICAL_SCALE * heightScale; // per-row vertical step
   const totalH = R * uy;
   const dHome = totalH * tHome;
 
@@ -267,7 +422,6 @@ function findHomeRowIndex() {
   return { LB, RB, TR, TL };
 }
 
-
 // Bilinear map with v=0 bottom row, v=1 top row
 function mapRectToQuad(u, v, q){
   const {LB, RB, TR, TL} = q;
@@ -279,7 +433,12 @@ function mapRectToQuad(u, v, q){
 function drawPolygon(points) {
   octx.beginPath();
   octx.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i++) octx.lineTo(points[i].x, points[i].y);
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i];
+    // Guard against bad coords just in case
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+    octx.lineTo(p.x, p.y);   // ← was missing the y argument
+  }
   octx.closePath();
   octx.stroke();
 }
@@ -300,7 +459,6 @@ function isSpecial(labelRaw){
   ]);
   return specials.has(label) || specials.has(labelRaw);
 }
-
 
 function drawKeyboard(q){
   if (!q) return;
@@ -505,6 +663,7 @@ function pump(){
           drawHands(result);
           if (!frozen) updateCalibration(result, nowMs);
           drawKeyboard(quad);
+          drawFingerKeyLabels(result, quad);
           lastVideoTime = vt;
         } catch (e) {
           console.error('detect/draw error', e);
@@ -539,6 +698,30 @@ stopBtn.addEventListener('click', () => { stopStream(); clearOverlay(); });
 snapBtn.addEventListener('click', downloadSnapshot);
 blackChk.addEventListener('change', updateBlackMode);
 recalBtn.addEventListener('click', () => { startCalibration(); });
+
+// Height slider
+if (heightSlider) {
+  setHeightScale(heightSlider.value);                // initialize UI → state
+  heightSlider.addEventListener('input', (e) => setHeightScale(e.target.value));
+}
+// Ratio slider
+if (ratioSlider) {
+  setTopShrink(ratioSlider.value);                   // initialize UI → state
+  ratioSlider.addEventListener('input', (e) => setTopShrink(e.target.value));
+}
+// Defaults
+if (heightDefaultBtn) {
+  heightDefaultBtn.addEventListener('click', () => {
+    heightSlider.value = '1.00';
+    setHeightScale('1.00');
+  });
+}
+if (ratioDefaultBtn) {
+  ratioDefaultBtn.addEventListener('click', () => {
+    ratioSlider.value = '0.65';
+    setTopShrink('0.65');
+  });
+}
 
 video.addEventListener('playing', () => requestAnimationFrame(pump));
 window.addEventListener('resize', resizeOverlayToVideo);
