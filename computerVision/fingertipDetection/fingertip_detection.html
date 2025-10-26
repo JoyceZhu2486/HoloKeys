@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>HoloKeys V18: RGB+HSL Gradient Search & Proportional Factor 3.5</title>
+  <title>HoloKeys V22: Max Search Distance Halved to 30</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     /* Base CSS Styles for clean, responsive layout */
@@ -63,7 +63,6 @@
     }
 
     /* Status text colors for log */
-    /* M4/Centroid colors are removed, focusing on M5/Gradient and Fallback/M2 */
     .fallback-text { color: #dc2626; font-weight: bold; } /* M5 Fallback: Red */
     .default-text { color: #f97316; font-weight: bold; } /* M1/M2: Orange */
     .gradient-text { color: #3b82f6; font-weight: bold; } /* M5 Gradient: Blue */
@@ -71,7 +70,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
 </head>
 <body>
-  <header><strong>HoloKeys V18: RGB+HSL Gradient Search & Proportional Factor 3.5</strong></header>
+  <header><strong>HoloKeys V22: Max Search Distance Halved to 30</strong></header>
 
   <main class="container">
     <div class="toolbar" id="toolbar">
@@ -86,7 +85,7 @@
       </select>
       
       <label>M5 Grad. Thresh: <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width: 50px;"></label>
-      <label>Proportion Factor: <input type="number" step="0.5" id="inputExtensionFactor" value="3.5" min="0.1" max="5.0" style="width: 50px;"></label>
+      <label>Proportion Factor: <input type="number" step="0.5" id="inputExtensionFactor" value="0.35" min="0.1" max="5.0" style="width: 50px;"></label>
 
       <span class="status" id="status">Idle</span>
     </div>
@@ -129,7 +128,7 @@
     const DEFAULT_TIP_COLOR = '#f97316';    // Orange (M1/M2)
     
     // M5 Constants
-    const M5_MAX_SEARCH_DIST = 60; 
+    const M5_MAX_SEARCH_DIST = 30; // CHANGED: Halved from 60 to 30 pixels
     const M5_LOOKAHEAD = 5;       
     const M5_MIN_SUCCESS_DIST = 5; 
 
@@ -140,7 +139,7 @@
     const tempCanvas = document.getElementById("tempCanvas");
     const tctx      = tempCanvas.getContext("2d");
     const inputGradientThreshold = document.getElementById("inputGradientThreshold");
-    const inputExtensionFactor = document.getElementById("inputExtensionFactor"); // New/Updated input
+    const inputExtensionFactor = document.getElementById("inputExtensionFactor");
     const selectMethod = document.getElementById("selectMethod");
     const contactLog = document.getElementById("contactLog");
     const statusEl = document.getElementById("status");
@@ -264,8 +263,8 @@
       const vecY = pTip.y - pBase.y;
       const length = Math.sqrt(vecX * vecX + vecY * vecY); 
       
-      // Get adjustable factor, default is 3.5
-      const EXTENSION_FACTOR = parseFloat(inputExtensionFactor.value) || 3.5; 
+      // Get adjustable factor, defaults to the value set in HTML (now 0.35)
+      const EXTENSION_FACTOR = parseFloat(inputExtensionFactor.value) || 0.35; 
 
       if (length < 1) return null; 
       const unitX = vecX / length; 
@@ -278,7 +277,6 @@
           y: pTip.y + unitY * proportionalExtension 
       };
       
-      // M4 ROI data is now unused but the structure remains for projection logic
       const PROPORTIONAL_WIDTH_FACTOR = 0.5;
       const widthMargin = length * PROPORTIONAL_WIDTH_FACTOR; 
 
@@ -328,7 +326,7 @@
         octx.moveTo(tipX, tipY);
         
         // 1. Iterate outwards along the projection vector
-        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) {
+        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) { // M5_MAX_SEARCH_DIST is now 30
             const currentX = Math.round(tipX + unitX * dist);
             const currentY = Math.round(tipY + unitY * dist);
 
@@ -388,7 +386,6 @@
 
 
     // --- Drawing Functions ---
-    // drawROIBox is no longer necessary as M4 is removed.
     
     function drawFinalTip(point, name, selectedMethod) {
         let markerColor = DEFAULT_TIP_COLOR; 
