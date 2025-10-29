@@ -1,73 +1,102 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>HoloKeys — Integrated (Camera + Calibration + Fingertips)</title>
+  <meta charset="utf-8" />
+  <title>HoloKeys – Integrated Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    :root { --pad: 12px; }
-    *{ box-sizing: border-box; }
-    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin: var(--pad); color:#111;}
-    h1{ font-size:1.1rem; margin:0 0 .5rem;}
-    .row{ display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.5rem 0; }
-    select,button,label,input{ padding:.45rem .6rem; border-radius:8px; border:1px solid #ccc; background:#fff; }
-    .pill{ padding:.15rem .5rem; border-radius:999px; background:#eef; border:1px solid #ccd; font-size:.82rem; display:flex; align-items:center; gap:.5rem;}
-    .sep{ flex:1; }
-    .stage{ position:relative; width:100%; max-width:960px; }
-    video{ width:100%; border-radius:12px; display:block; background:#000; }
-    canvas.overlay{ position:absolute; inset:0; pointer-events:none; width:100%; border-radius:12px; display:block; background:transparent; z-index:1; }
-    #frame{ display:none; }
-    #status{ padding:.15rem .5rem; border-radius:999px; background:#eee; font-size:.82rem;}
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; display:flex; gap:12px; align-items:center; }
+    main { padding: 12px 14px 24px; display:grid; gap:14px; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    button, select, label, input { font:inherit; }
+    .stage-wrap { position:relative; display:inline-block; border-radius:12px; overflow:hidden; background:#111; }
+    #stage { position:relative; background:#111; }
+    video, canvas { position:absolute; left:0; top:0; }
+    .editor-wrap { max-width: 900px; }
+    #editor {
+      width:100%; min-height:200px; padding:10px 12px; border:1px solid #ccc; border-radius:12px;
+      font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      resize:vertical; outline:none;
+    }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill { padding:2px 8px; border-radius:999px; background:#eee; font-size:12px; }
   </style>
-  <script type="module" src="./app.js"></script>
+  <!-- MediaPipe Tasks (ESM) -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs"></script>
 </head>
 <body>
-  <h1>HoloKeys — Integrated</h1>
-
-  <div class="row">
-    <button id="start">Start (rear)</button>
-    <select id="cameraSelect" title="Choose camera"></select>
-    <button id="stop" disabled>Stop</button>
-    <button id="snap">Capture JPG</button>
-
-    <label class="pill"><input type="checkbox" id="live" checked> Live</label>
-    <label class="pill"><input type="checkbox" id="showHands" checked> Landmarks</label>
-    <label class="pill"><input type="checkbox" id="showDebug" checked> F/J debug</label>
-    <label class="pill"><input type="checkbox" id="blackMode"> Black screen</label>
-    <button id="recalibrate" class="pill">Recalibrate</button>
-
-    <label class="pill">Height
-      <input type="range" id="height" min="0.60" max="1.80" step="0.02" value="1.00">
-      <span id="heightVal">100%</span>
-    </label>
-    <button id="heightDefault" class="pill">Default</button>
-
-    <label class="pill">Top/Bottom
-      <input type="range" id="ratio" min="0.40" max="1.40" step="0.02" value="0.65">
-      <span id="ratioVal">0.65</span>
-    </label>
-    <button id="ratioDefault" class="pill">Default</button>
-
-    <label class="pill">Method
-      <select id="selectMethod">
-        <option value="GRADIENT_CHANGE" selected>Gradient (M5)</option>
-        <option value="PROJECTION">Projection (M2)</option>
-        <option value="LANDMARK_TIP">Landmark Tip (M1)</option>
-      </select>
-    </label>
-    <label class="pill">M5 Thresh <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width:64px"></label>
-    <label class="pill">Ext. Factor <input type="number" id="inputExtensionFactor" value="3.5" step="0.5" min="0.1" max="5.0" style="width:64px"></label>
-
-    <span class="sep"></span>
+  <header>
+    <strong>HoloKeys – Camera + Fingertips + Calibration</strong>
     <span class="pill" id="status">Idle</span>
-  </div>
+  </header>
 
-  <div class="stage">
-    <video id="preview" playsinline muted></video>
-    <canvas id="overlay" class="overlay"></canvas>
-  </div>
+  <main>
+    <section class="toolbar">
+      <button id="btnStartRear">Start (rear)</button>
+      <button id="btnStartFront">Start (front)</button>
+      <select id="cameraSelect" title="Choose camera"></select>
+      <button id="btnStop" disabled>Stop</button>
+      <button id="btnSnap">Capture JPG</button>
 
-  <!-- hidden buffer for per-frame pixel ops (M5) and snapshots -->
-  <canvas id="frame"></canvas>
+      <label><input type="checkbox" id="chkLive"> Live</label>
+      <label><input type="checkbox" id="chkShowHands" checked> Show hands</label>
+      <label><input type="checkbox" id="chkShowDebug"> Debug (F/J marks)</label>
+      <label><input type="checkbox" id="chkBlack"> Black BG</label>
+
+      <label>Height:
+        <input type="range" id="height" min="0.3" max="3.0" step="0.01" value="1.00">
+        <span id="heightVal">100%</span>
+        <button id="heightDefault" type="button">Reset</button>
+      </label>
+
+      <label>Top/Bottom ratio:
+        <input type="range" id="ratio" min="0.3" max="1.5" step="0.01" value="0.65">
+        <span id="ratioVal">0.65</span>
+        <button id="ratioDefault" type="button">Reset</button>
+      </label>
+
+      <label>Tip method:
+        <select id="selectMethod">
+          <option value="GRADIENT_CHANGE" selected>M5: Gradient (RGB+HSL) + fallback</option>
+          <option value="PROJECTION">M2: Proportional projection</option>
+          <option value="LANDMARK_TIP">M1: Landmark tip</option>
+        </select>
+      </label>
+
+      <label>M5 Threshold:
+        <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width:64px;">
+      </label>
+      <label>Projection factor:
+        <input type="number" id="inputExtensionFactor" value="0.35" step="0.05" min="0.1" max="5.0" style="width:64px;">
+      </label>
+
+      <button id="btnRecal">Recalibrate</button>
+    </section>
+
+    <section class="stage-wrap" id="stageWrap">
+      <div id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+    </section>
+
+    <section class="editor-wrap">
+      <div class="row">
+        <button id="focusEditorBtn" type="button">Focus editor</button>
+        <button id="clearEditorBtn" type="button">Clear</button>
+      </div>
+      <textarea id="editor" placeholder="Typed output appears here…"></textarea>
+    </section>
+
+    <!-- Hidden temp canvas for pixel ops -->
+    <canvas id="tempCanvas" style="display:none"></canvas>
+    <canvas id="frame" hidden></canvas>
+  </main>
+
+  <!-- App modules -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
