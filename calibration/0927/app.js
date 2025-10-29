@@ -686,7 +686,7 @@ async function startStreamWith(constraints){
 
 startBtn.addEventListener('click', async () => {
   await startStreamWith({
-    video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
+    video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
     audio: false
   });
 });
