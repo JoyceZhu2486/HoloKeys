@@ -471,7 +471,7 @@ function drawKeyboard(q){
   const pTop = mapRectToQuad(0.5, vBandTop, q);
   const pBot = mapRectToQuad(0.5, vBandBot, q);
   const keyHeightPx = Math.hypot(pTop.x - pBot.x, pTop.y - pBot.y);
-  const labelSize = keyHeightPx * 0.45;
+  const labelSize = keyHeightPx * 0.64;
 
   // Draw rows, bottom → top
   for (let r = 0; r < R; r++) {
@@ -498,7 +498,7 @@ function drawKeyboard(q){
       const special = isSpecial(k.label);
       octx.lineWidth = special ? 2 : 1.25;
       octx.strokeStyle = special ? 'rgba(0,120,0,0.95)' : 'rgba(0,128,255,0.6)';
-      octx.fillStyle   = special ? 'rgba(0,120,0,0.08)' : 'rgba(0,128,255,0.08)';
+      octx.fillStyle   = special ? 'rgba(0,120,0,0.14)' : 'rgba(0,128,255,0.14)';
 
       // Outline & fill
       drawPolygon([p0, p1, p2, p3]);
@@ -686,7 +686,7 @@ async function startStreamWith(constraints){
 
 startBtn.addEventListener('click', async () => {
   await startStreamWith({
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
+    video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
     audio: false
   });
 });
