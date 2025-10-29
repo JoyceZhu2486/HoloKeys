@@ -684,11 +684,26 @@ async function startStreamWith(constraints){
   await startStream(constraints);
 }
 
+// startBtn.addEventListener('click', async () => {
+//   await startStreamWith({
+//     video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
+//     audio: false
+//   });
+// });
+startBtn.textContent = 'Start (front cam)';
 startBtn.addEventListener('click', async () => {
+  currentDeviceId = null; // reset any prior manual selection
   await startStreamWith({
-    video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } },
+    video: { facingMode: 'user' },   // minimal; string form works best on iOS/Android
     audio: false
   });
+
+  // sanity check & display what we actually got
+  const track = stream?.getVideoTracks?.()[0];
+  if (track) {
+    const s = track.getSettings?.() || {};
+    statusEl.textContent = `Using: ${s.facingMode || 'unknown'} — ${track.label || 'camera'}`;
+  }
 });
 camSel.addEventListener('change', async () => {
   currentDeviceId = camSel.value;
