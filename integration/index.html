@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>HoloKeys — Integrated (Camera + Calibration + Fingertips)</title>
+  <style>
+    :root { --pad: 12px; }
+    *{ box-sizing: border-box; }
+    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin: var(--pad); color:#111;}
+    h1{ font-size:1.1rem; margin:0 0 .5rem;}
+    .row{ display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.5rem 0; }
+    select,button,label,input{ padding:.45rem .6rem; border-radius:8px; border:1px solid #ccc; background:#fff; }
+    .pill{ padding:.15rem .5rem; border-radius:999px; background:#eef; border:1px solid #ccd; font-size:.82rem; display:flex; align-items:center; gap:.5rem;}
+    .sep{ flex:1; }
+    .stage{ position:relative; width:100%; max-width:960px; }
+    video{ width:100%; border-radius:12px; display:block; background:#000; }
+    canvas.overlay{ position:absolute; inset:0; pointer-events:none; width:100%; border-radius:12px; display:block; background:transparent; z-index:1; }
+    #frame{ display:none; }
+    #status{ padding:.15rem .5rem; border-radius:999px; background:#eee; font-size:.82rem;}
+  </style>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <h1>HoloKeys — Integrated</h1>
+
+  <div class="row">
+    <button id="start">Start (rear)</button>
+    <select id="cameraSelect" title="Choose camera"></select>
+    <button id="stop" disabled>Stop</button>
+    <button id="snap">Capture JPG</button>
+
+    <label class="pill"><input type="checkbox" id="live" checked> Live</label>
+    <label class="pill"><input type="checkbox" id="showHands" checked> Landmarks</label>
+    <label class="pill"><input type="checkbox" id="showDebug" checked> F/J debug</label>
+    <label class="pill"><input type="checkbox" id="blackMode"> Black screen</label>
+    <button id="recalibrate" class="pill">Recalibrate</button>
+
+    <label class="pill">Height
+      <input type="range" id="height" min="0.60" max="1.80" step="0.02" value="1.00">
+      <span id="heightVal">100%</span>
+    </label>
+    <button id="heightDefault" class="pill">Default</button>
+
+    <label class="pill">Top/Bottom
+      <input type="range" id="ratio" min="0.40" max="1.40" step="0.02" value="0.65">
+      <span id="ratioVal">0.65</span>
+    </label>
+    <button id="ratioDefault" class="pill">Default</button>
+
+    <label class="pill">Method
+      <select id="selectMethod">
+        <option value="GRADIENT_CHANGE" selected>Gradient (M5)</option>
+        <option value="PROJECTION">Projection (M2)</option>
+        <option value="LANDMARK_TIP">Landmark Tip (M1)</option>
+      </select>
+    </label>
+    <label class="pill">M5 Thresh <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width:64px"></label>
+    <label class="pill">Ext. Factor <input type="number" id="inputExtensionFactor" value="3.5" step="0.5" min="0.1" max="5.0" style="width:64px"></label>
+
+    <span class="sep"></span>
+    <span class="pill" id="status">Idle</span>
+  </div>
+
+  <div class="stage">
+    <video id="preview" playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+  </div>
+
+  <!-- hidden buffer for per-frame pixel ops (M5) and snapshots -->
+  <canvas id="frame"></canvas>
+</body>
+</html>
