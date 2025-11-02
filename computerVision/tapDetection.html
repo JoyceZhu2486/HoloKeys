@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys - Finalized Tap Detection with Defaults and Thinner Border</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* Base CSS Styles for clean, responsive layout */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; }
+    main { padding: 10px 14px 18px; }
+
+    /* Toolbar for controls */
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; margin-bottom: 10px;
+    }
+    .toolbar button, .toolbar label, .toolbar select, .toolbar input[type="number"] { font: inherit; }
+    .toolbar button {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 10px; background: #f6f6f6; cursor: pointer;
+      transition: background 0.1s;
+    }
+    .toolbar button:hover:not(:disabled) { background: #e9e9e9; }
+    .toolbar button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      padding: 2px 8px; border-radius: 999px; background: #eee; font-size: 12px;
+    }
+    /* Style for the number input */
+    .toolbar input[type="number"] {
+        /* Adjusted width for precision values */
+        width: 105px; 
+        padding: 6px 4px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        text-align: right;
+        font-family: monospace;
+    }
+
+    /* Video and Canvas container */
+    .stage-wrap {
+      position: relative;
+      transform-origin: top left;
+      display: inline-block;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      /* Permanent transparent border to maintain size/position */
+      border: 3px solid transparent; 
+      transition: box-shadow 0.1s, border 0.1s; 
+    }
+    
+    /* Thinner Red Border/Glow on Tap Detection (3px border + thinner shadow) */
+    .tap-detected-border {
+        border: 3px solid red; /* Must remain 3px to prevent layout shift */
+        /* Reduced glow spread from 20px 5px to 8px 2px */
+        box-shadow: 0 0 8px 2px rgba(255, 0, 0, 0.6); 
+    }
+
+    #stage { position: relative; background: #111; }
+    #video, #overlay { position: absolute; left: 0; top: 0; }
+
+    .container {
+      width: 100%;
+      display: grid;
+      justify-content: center;
+    }
+
+    /* Log Panel for tracking data */
+    .panel-container {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 15px;
+        width: 100%;
+        max-width: 800px;
+        margin-top: 15px;
+    }
+    .log-panel, .tap-log-panel {
+        background: #f6f6f6;
+        padding: 15px;
+        border-radius: 8px;
+        color: #1f2937;
+    }
+    .tap-list {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding-bottom: 10px;
+        min-height: 150px;
+    }
+    .tap-record {
+        flex-shrink: 0;
+        width: 150px;
+        background: #fff;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid #ccc;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .tap-record img {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-bottom: 1px solid #ddd;
+    }
+    .tap-record-info {
+        padding: 5px;
+        font-size: 10px;
+        text-align: center;
+        font-family: monospace;
+        word-break: break-all;
+    }
+    .log-hand-label {
+        font-weight: bold;
+        margin-top: 8px;
+        margin-bottom: 4px;
+        display: block;
+        border-bottom: 1px dashed #ccc;
+        padding-bottom: 2px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
+</head>
+<body>
+  <header><strong>HoloKeys - Finalized Tap Detection with Defaults and Thinner Border</strong></header>
+
+  <main class="container">
+    <div class="toolbar" id="toolbar">
+      <button id="btnStart">Start Camera</button>
+      <label><input type="checkbox" id="chkLive"> Live Detect</label>
+      
+      <span class="status" id="status">Idle</span>
+
+      <label>Tap Start Velocity (units/ms):
+        <input type="number" id="inputSpeedThreshold" min="0.00005" max="0.01" step="0.00005" value="0.00015">
+      </label>
+
+      <label>Min Tap Distance (Y-units):
+        <input type="number" id="inputDistanceThreshold" min="0.001" max="0.05" step="0.001" value="0.010">
+      </label>
+    </div>
+
+    <div class="stage-wrap" id="stageWrap">
+      <section id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+    </div>
+
+    <div class="panel-container">
+        <div class="tap-log-panel">
+            <strong>Recorded Tap Events (Speed, Distance, Time)</strong>
+            <div class="tap-list" id="tapList">
+                <div style="padding: 10px; color: #6b7280;">Tap detection uses speed, distance, and a suppression filter for the pinky finger.</div>
+            </div>
+        </div>
+
+        <div class="log-panel">
+            <strong>Refined Fingertip Position Log (M5)</strong>
+            <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem; border: 1px solid #ccc;">
+                Tracking not active.
+            </div>
+        </div>
+    </div>
+  </main>
+  
+  <canvas id="tempCanvas" style="display: none;"></canvas>
+
+  <script type="module">
+    import { HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js";
+
+    // --- CONFIGURATION & CONSTANTS ---
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+    
+    // Mapping all 5 fingertip landmark indices
+    const FINGERTIP_MAP = { 
+        4: { name: "Thumb", base: 3 }, 
+        8: { name: "Index", base: 7 }, 
+        12: { name: "Middle", base: 11 }, 
+        16: { name: "Ring", base: 15 }, 
+        20: { name: "Pinky", base: 19 } 
+    };
+    const FINGERTIP_INDICES = Object.keys(FINGERTIP_MAP).map(Number);
+    
+    // Tap Suppression Hierarchy: Ring (16) suppresses Pinky (20)
+    const FINGER_SUPPRESSION_HIERARCHY = { 
+        16: 20 
+    };
+    
+    // Explicit colors
+    const FALLBACK_COLOR = '#dc2626';    
+    const GRADIENT_COLOR = '#3b82f6';    
+    
+    // M5 Constants
+    const M5_MAX_SEARCH_DIST = 30; 
+    const M5_LOOKAHEAD = 5;       
+    const M5_MIN_SUCCESS_DIST = 5; 
+    const GRADIENT_THRESHOLD = 30;
+    const EXTENSION_FACTOR = 0.35;
+
+    // Tap Detection Parameters
+    const HISTORY_LENGTH = 5; 
+    const DEBOUNCE_DELAY = 500; 
+    
+    // Velocity is in Normalized Y-units per millisecond
+    const TAP_STOP_VELOCITY_THRESHOLD = 0.0005; 
+    const MIN_TAP_DURATION_MS = 30; 
+    const MAX_TAP_VELOCITY = 0.005; 
+
+    // GLOBAL TUNABLE VARIABLES (Restored to initial defaults)
+    let tapVelocityThreshold = 0.00015; 
+    let minTapDistance = 0.010; 
+
+    // Connections for the hand skeleton (standard MediaPipe)
+    const HAND_CONNECTIONS = [
+        [0, 1], [1, 2], [2, 3], [3, 4],       // Thumb
+        [0, 5], [5, 6], [6, 7], [7, 8],       // Index
+        [0, 9], [9, 10], [10, 11], [11, 12],  // Middle
+        [0, 13], [13, 14], [14, 15], [15, 16], // Ring
+        [0, 17], [17, 18], [18, 19], [19, 20]  // Pinky
+    ];
+
+    // DOM Elements
+    const video     = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const octx      = overlay.getContext("2d");
+    const tempCanvas = document.getElementById("tempCanvas");
+    const tctx      = tempCanvas.getContext("2d");
+    const contactLog = document.getElementById("contactLog");
+    const tapList = document.getElementById("tapList");
+    const statusEl = document.getElementById("status");
+    const btnStart = document.getElementById("btnStart");
+    const chkLive = document.getElementById("chkLive");
+    const stage = document.getElementById("stage");
+    const stageWrap = document.getElementById("stageWrap");
+    const toolbar = document.getElementById("toolbar");
+    const inputSpeedThreshold = document.getElementById("inputSpeedThreshold"); 
+    const inputDistanceThreshold = document.getElementById("inputDistanceThreshold"); 
+
+    // Model and State
+    let handLandmarker = null;
+    let lastGoodResult = null; 
+    let rafId = null; 
+
+    // Tap Detection State - Initialized for all 5 fingers
+    let handHistory = { 0: {}, 1: {} }; 
+    let tapStates = { 0: {}, 1: {} }; 
+
+    FINGERTIP_INDICES.forEach(index => {
+        handHistory[0][index] = [];
+        handHistory[1][index] = [];
+        tapStates[0][index] = { active: false, peakSpeed: 0, startY: 0, startTimestamp: 0 };
+        tapStates[1][index] = { active: false, peakSpeed: 0, startY: 0, startTimestamp: 0 };
+    });
+
+    let lastTapTime = 0; // Global debounce
+
+
+    // --- Initialization of Thresholds ---
+    const SPEED_STORAGE_KEY = 'tapVelocityThreshold';
+    const DISTANCE_STORAGE_KEY = 'minTapDistance';
+
+    // 1. Initialize Speed Threshold
+    const storedSpeed = localStorage.getItem(SPEED_STORAGE_KEY);
+    if (storedSpeed) {
+      // Use stored value if available, but ensure input field reflects default if logic below sets it.
+      tapVelocityThreshold = parseFloat(storedSpeed);
+    } else {
+      // Set initial value in storage to the default
+      localStorage.setItem(SPEED_STORAGE_KEY, tapVelocityThreshold);
+    }
+    inputSpeedThreshold.value = tapVelocityThreshold; // Ensure UI matches the effective value
+
+    // 2. Initialize Distance Threshold
+    const storedDistance = localStorage.getItem(DISTANCE_STORAGE_KEY);
+    if (storedDistance) {
+        minTapDistance = parseFloat(storedDistance);
+    } else {
+        localStorage.setItem(DISTANCE_STORAGE_KEY, minTapDistance);
+    }
+    inputDistanceThreshold.value = minTapDistance; // Ensure UI matches the effective value
+
+    // Add event listener for SPEED change
+    inputSpeedThreshold.addEventListener('input', (e) => {
+      const newValue = parseFloat(e.target.value);
+      if (!isNaN(newValue) && newValue > 0) {
+        tapVelocityThreshold = newValue;
+        localStorage.setItem(SPEED_STORAGE_KEY, newValue);
+      }
+    });
+
+    // Add event listener for DISTANCE change
+    inputDistanceThreshold.addEventListener('input', (e) => {
+      const newValue = parseFloat(e.target.value);
+      if (!isNaN(newValue) && newValue > 0) {
+        minTapDistance = newValue;
+        localStorage.setItem(DISTANCE_STORAGE_KEY, newValue);
+      }
+    });
+
+
+    // --- Utility Functions (Omitted sizing/M5 logic for script brevity, but retained in file) ---
+    function setExactStageSize(w, h) {
+      stage.style.width  = w + "px";
+      stage.style.height = h + "px";
+      overlay.width  = w; 
+      overlay.height = h;
+      stageWrap.style.width  = w + 6 + "px"; 
+      stageWrap.style.height = h + 6 + "px";
+    }
+
+    function ensureSizedToVideo() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return false;
+      const sized = parseInt(stageWrap.style.width) === (vw + 6) && parseInt(stageWrap.style.height) === (vh + 6);
+      if (!sized) setExactStageSize(vw, vh);
+      return true;
+    }
+
+    function clearOverlay() {
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function fitStageToScreen() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const availableW = document.documentElement.clientWidth - 20;
+      const availableH = document.documentElement.clientHeight - (toolbarRect.height + 28);
+      const scale = Math.min(1, availableW / (vw + 6), availableH / (vh + 6)); 
+      stageWrap.style.transform = `scale(${scale})`;
+    }
+    
+    function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+        if (max === min) { h = s = 0; } else {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        return [h * 360, s, l];
+    }
+    
+    function calculateColorDifference(r1, g1, b1, r2, g2, b2) {
+        const diffR = (r1 - r2) / 255;
+        const diffG = (g1 - g2) / 255;
+        const diffB = (b1 - b2) / 255;
+        const rgbDist = Math.sqrt(diffR * diffR + diffG * diffG + diffB * diffB);
+        const [h1, s1, l1] = rgbToHsl(r1, g1, b1);
+        const [h2, s2, l2] = rgbToHsl(r2, g2, b2);
+        let diffH = Math.abs(h1 - h2);
+        if (diffH > 180) diffH = 360 - diffH;
+        diffH /= 180; 
+        const diffS = Math.abs(s1 - s2);
+        const diffL = Math.abs(l1 - l2);
+        let combinedScore = (rgbDist * 0.5) + (diffH * 0.25) + (diffS * 0.125) + (diffL * 0.125);
+        return combinedScore * 255;
+    }
+    
+    function calculateFingertipROI(landmarks, tipIndex, baseIndex) {
+      if (!landmarks || landmarks.length <= tipIndex || landmarks.length <= baseIndex) return null;
+      
+      const tip = landmarks[tipIndex];
+      const base = landmarks[baseIndex];
+      const w = overlay.width;
+      const h = overlay.height;
+
+      const pTip = { x: tip.x * w, y: tip.y * h };
+      const pBase = { x: base.x * w, y: base.y * h };
+
+      const vecX = pTip.x - pBase.x;
+      const vecY = pTip.y - pBase.y;
+      const length = Math.sqrt(vecX * vecX + vecY * vecY); 
+      
+      if (length < 1) return null; 
+      const unitX = vecX / length; 
+      const unitY = vecY / length; 
+      
+      const proportionalExtension = length * EXTENSION_FACTOR;
+      const pProjection = { x: pTip.x + unitX * proportionalExtension, y: pTip.y + unitY * proportionalExtension };
+
+      return { 
+          projectionX: pProjection.x, projectionY: pProjection.y,
+          tipX: pTip.x, tipY: pTip.y,
+          unitX: unitX, unitY: unitY
+      };
+    }
+
+    function findGradientTip(roiData) {
+        const videoW = video.videoWidth;
+        const videoH = video.videoHeight;
+        tempCanvas.width = videoW;
+        tempCanvas.height = videoH;
+        tctx.drawImage(video, 0, 0, videoW, videoH);
+        const imageData = tctx.getImageData(0, 0, videoW, videoH);
+        const data = imageData.data;
+
+        const { tipX, tipY, unitX, unitY, projectionX, projectionY } = roiData;
+        let finalPoint = null;
+
+        octx.strokeStyle = GRADIENT_COLOR;
+        octx.lineWidth = 2;
+        octx.setLineDash([5, 5]); 
+        octx.beginPath();
+        octx.moveTo(tipX, tipY);
+        
+        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) { 
+            const currentX = Math.round(tipX + unitX * dist);
+            const currentY = Math.round(tipY + unitY * dist);
+
+            if (currentX < 0 || currentX >= videoW || currentY < 0 || currentY >= videoH) break;
+
+            const lookAheadX = Math.round(tipX + unitX * (dist + M5_LOOKAHEAD));
+            const lookAheadY = Math.round(tipY + unitY * (dist + M5_LOOKAHEAD));
+
+            if (lookAheadX < 0 || lookAheadX >= videoW || lookAheadY < 0 || lookAheadY >= videoH) break;
+
+            const currentIdx = (currentY * videoW + currentX) * 4;
+            const lookAheadIdx = (lookAheadY * videoW + lookAheadX) * 4;
+
+            if (currentIdx + 2 >= data.length || lookAheadIdx + 2 >= data.length) break;
+
+            const r1 = data[currentIdx], g1 = data[currentIdx + 1], b1 = data[currentIdx + 2];
+            const r2 = data[lookAheadIdx], g2 = data[lookAheadIdx + 1], b2 = data[lookAheadIdx + 2];
+
+            const gradient = calculateColorDifference(r1, g1, b1, r2, g2, b2);
+
+            if (gradient > GRADIENT_THRESHOLD) {
+                if (dist > M5_MIN_SUCCESS_DIST) {
+                    finalPoint = { x: currentX, y: currentY, source: 'Gradient (M5)' };
+                    break;
+                }
+            }
+        }
+        
+        if (!finalPoint) {
+            finalPoint = { x: projectionX, y: projectionY, source: 'Fallback (M2)' };
+            octx.lineTo(finalPoint.x, finalPoint.y);
+        } else {
+            octx.lineTo(finalPoint.x, finalPoint.y);
+        }
+
+        octx.stroke();
+        octx.setLineDash([]); 
+
+        return finalPoint;
+    }
+
+
+    // --- Tap Detection and Recording ---
+
+    function recordHandMotion(landmarks, handIndex, timestamp) {
+        if (!landmarks) return;
+        
+        FINGERTIP_INDICES.forEach(index => {
+            if (landmarks.length > index) {
+                const fingerTip = landmarks[index];
+                const history = handHistory[handIndex][index];
+
+                // Store {normalized Y, time} - ONLY vertical position is recorded.
+                history.push({ y: fingerTip.y, time: timestamp });
+
+                if (history.length > HISTORY_LENGTH) {
+                    history.shift();
+                }
+            }
+        });
+    }
+
+    function calculateInstantVelocity(history, lookbackFrames = 3) {
+        if (history.length <= lookbackFrames) return 0;
+        
+        const current = history[history.length - 1];
+        const previous = history[history.length - lookbackFrames]; 
+        
+        const deltaY = current.y - previous.y; 
+        const deltaTime = current.time - previous.time;
+
+        if (deltaTime <= 0 || deltaY <= 0) return 0; 
+        
+        return deltaY / deltaTime; 
+    }
+
+    /**
+     * Checks all 10 fingertips for a tap motion start or end and returns a list of POTENTIAL taps.
+     */
+    function checkForTap(timestamp) {
+        const potentialTapEvents = [];
+
+        const canStartNewTap = (timestamp - lastTapTime) > DEBOUNCE_DELAY;
+
+        for (let handIndex = 0; handIndex < 2; handIndex++) {
+            const handTipHistories = handHistory[handIndex];
+            const handStates = tapStates[handIndex];
+            
+            for (const fingerIndex of FINGERTIP_INDICES) {
+                const history = handTipHistories[fingerIndex];
+                const state = handStates[fingerIndex];
+                
+                if (history.length < HISTORY_LENGTH) continue;
+                
+                const speed = calculateInstantVelocity(history, 3); 
+
+                if (!state.active) {
+                    // Condition: Speed > Min AND Speed < Max (to filter glitches)
+                    if (canStartNewTap && speed > tapVelocityThreshold && speed < MAX_TAP_VELOCITY) {
+                        state.active = true;
+                        state.peakSpeed = speed; 
+                        state.startY = history[history.length - 1].y; 
+                        state.startTimestamp = timestamp; 
+                    }
+                } else {
+                    if (speed > state.peakSpeed) {
+                        state.peakSpeed = speed; 
+                    }
+                    
+                    const timeSinceStart = timestamp - state.startTimestamp;
+                    
+                    // Check for TAP END
+                    if (speed < TAP_STOP_VELOCITY_THRESHOLD && timeSinceStart > MIN_TAP_DURATION_MS) {
+                        
+                        const totalYDrop = history[history.length - 1].y - state.startY;
+                        
+                        // Final success condition check against tunable distance
+                        if (totalYDrop > minTapDistance && state.peakSpeed > tapVelocityThreshold) { 
+                            potentialTapEvents.push({
+                                handIndex,
+                                fingerIndex,
+                                timestamp,
+                                speed: state.peakSpeed,
+                                motionLength: totalYDrop,
+                            });
+                        }
+
+                        // Reset state regardless of final success
+                        state.active = false;
+                        state.peakSpeed = 0;
+                    }
+                }
+            }
+        }
+        
+        return potentialTapEvents;
+    }
+
+    /**
+     * Applies suppression rules to simultaneous taps and finalizes them.
+     */
+    function processTapEvents(potentialTaps) {
+        if (potentialTaps.length === 0) return;
+
+        // Map to easily check for a tap event by hand and finger index
+        const tapsByHandAndFinger = potentialTaps.reduce((acc, tap) => {
+            const key = `${tap.handIndex}-${tap.fingerIndex}`;
+            acc[key] = tap;
+            return acc;
+        }, {});
+
+        // Apply suppression rules (Ring suppresses Pinky)
+        for (const [dominantIndexStr, submissiveIndex] of Object.entries(FINGER_SUPPRESSION_HIERARCHY)) {
+            const dominantIndex = parseInt(dominantIndexStr);
+            
+            // Check both hands
+            for (let handIndex = 0; handIndex < 2; handIndex++) {
+                const dominantKey = `${handIndex}-${dominantIndex}`;
+                const submissiveKey = `${handIndex}-${submissiveIndex}`;
+
+                // If both the dominant (Ring) and submissive (Pinky) tapped in the same frame:
+                if (tapsByHandAndFinger[dominantKey] && tapsByHandAndFinger[submissiveKey]) {
+                    // SUPPRESS the submissive finger (Pinky)
+                    delete tapsByHandAndFinger[submissiveKey];
+                }
+            }
+        }
+
+        // Process the final (non-suppressed) taps
+        for (const tapKey in tapsByHandAndFinger) {
+            handleTap(tapsByHandAndFinger[tapKey]);
+        }
+    }
+
+
+    /**
+     * Creates a log entry with the required tap event pack data, and triggers the red frame.
+     */
+    function handleTap(tapEvent) {
+        lastTapTime = tapEvent.timestamp;
+        
+        // 1. Visual Feedback (Red Border)
+        stageWrap.classList.add('tap-detected-border'); 
+        setTimeout(() => {
+            stageWrap.classList.remove('tap-detected-border');
+        }, 100);
+
+        // 2. Record the tap screenshot
+        const videoW = video.videoWidth;
+        const videoH = video.videoHeight;
+        tempCanvas.width = videoW;
+        tempCanvas.height = videoH;
+        tctx.drawImage(video, 0, 0, videoW, videoH);
+        const photoDataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
+        
+        // 3. Update the log with the event pack
+        const tapDate = new Date(tapEvent.timestamp);
+        const tapTime = tapDate.toLocaleTimeString() + '.' + String(tapDate.getMilliseconds()).padStart(3, '0');
+        const handLabel = `Hand ${tapEvent.handIndex + 1}`;
+        const fingerName = FINGERTIP_MAP[tapEvent.fingerIndex].name;
+        const speed = tapEvent.speed * 1000; 
+        const length = tapEvent.motionLength; 
+
+        const newTapEntry = document.createElement('div');
+        newTapEntry.className = 'tap-record';
+        newTapEntry.innerHTML = `
+            <img src="${photoDataUrl}" alt="Tap Screenshot" />
+            <div class="tap-record-info">
+                Finger: ${handLabel}, ${fingerName}<br>
+                Speed (Peak): ${speed.toFixed(5)} units/s<br>
+                Length (Y): ${length.toFixed(4)} units<br>
+                Time: ${tapTime}
+            </div>
+        `;
+
+        // Add to the front of the list
+        if (tapList.children.length === 0 || tapList.children[0].className !== 'tap-record') {
+            tapList.innerHTML = ''; 
+        }
+        tapList.insertBefore(newTapEntry, tapList.firstChild);
+    }
+    
+    // --- Drawing Functions (Omitted for brevity) ---
+
+    function drawHandLandmarks(landmarks) {
+        const w = overlay.width;
+        const h = overlay.height;
+
+        octx.strokeStyle = '#666'; 
+        octx.lineWidth = 1;
+
+        octx.beginPath();
+        HAND_CONNECTIONS.forEach(([startIdx, endIdx]) => {
+            const start = landmarks[startIdx];
+            const end = landmarks[endIdx];
+            
+            const startX = start.x * w;
+            const startY = start.y * h;
+            const endX = end.x * w;
+            const endY = end.y * h;
+
+            octx.moveTo(startX, startY);
+            octx.lineTo(endX, endY);
+        });
+        octx.stroke();
+
+        octx.fillStyle = '#666'; 
+        landmarks.forEach((point, index) => {
+            const x = point.x * w;
+            const y = point.y * h;
+            
+            octx.beginPath();
+            const radius = FINGERTIP_INDICES.includes(index) ? 5 : 4; 
+            octx.arc(x, y, radius, 0, 2 * Math.PI); 
+            octx.fill();
+        });
+    }
+    
+    function drawFinalTip(point, name) {
+        const markerColor = point.source.includes('Fallback') ? FALLBACK_COLOR : GRADIENT_COLOR;
+
+        octx.fillStyle = markerColor; 
+        octx.beginPath();
+        octx.arc(point.x, point.y, 10, 0, 2 * Math.PI);
+        octx.fill();
+        octx.strokeStyle = '#111'; 
+        octx.lineWidth = 2;
+        octx.stroke();
+
+        octx.fillStyle = '#fff';
+        octx.font = 'bold 14px system-ui';
+        octx.fillText(name, point.x + 15, point.y + 5);
+    }
+
+
+    // ---- Main Drawing and Detection Loop ----
+    function drawResults(result, timestamp) {
+      if (result?.landmarks?.length) {
+          lastGoodResult = result;
+      }
+      
+      const resultToDraw = lastGoodResult;
+
+      clearOverlay();
+      const logMessages = [];
+
+      if (!resultToDraw?.landmarks?.length) {
+          contactLog.innerHTML = 'No hands detected. Please ensure your hands are in view.';
+          return;
+      }
+      
+      // Loop through detected hands to record motion *first*
+      resultToDraw.landmarks.forEach((handLandmarks, handIndex) => {
+        recordHandMotion(handLandmarks, handIndex, timestamp);
+      });
+
+      // Check for POTENTIAL tap events
+      const potentialTaps = checkForTap(timestamp);
+      
+      // Filter and process tap events, applying suppression logic
+      processTapEvents(potentialTaps);
+
+
+      // Draw landmarks and refined tips
+      resultToDraw.landmarks.forEach((handLandmarks, handIndex) => {
+        
+        // 1. DRAW LANDMARKS
+        drawHandLandmarks(handLandmarks); 
+        
+        const handLabel = `Hand ${handIndex + 1}`;
+        logMessages.push(`<span class="log-hand-label">${handLabel}</span>`);
+
+        // 2. PROCESS AND DRAW REFINED TIP POSITIONS
+        for (const tipIndex in FINGERTIP_MAP) {
+            const config = FINGERTIP_MAP[tipIndex];
+            const tipIdx = parseInt(tipIndex);
+            
+            const roiData = calculateFingertipROI(handLandmarks, tipIdx, config.base);
+
+            if (!roiData) continue;
+            
+            let finalTip = findGradientTip(roiData);
+            
+            // Draw the final marker and log the result
+            if (finalTip) {
+                drawFinalTip(finalTip, config.name); 
+
+                const statusClass = finalTip.source.includes('Fallback') ? 'fallback-text' : 'gradient-text'; 
+
+                logMessages.push(
+                    `<div>- ${config.name} (<span class="${statusClass}">${finalTip.source}</span>): X:${finalTip.x.toFixed(1)}, Y:${finalTip.y.toFixed(1)}</div>`
+                );
+            }
+        }
+      });
+
+      contactLog.innerHTML = logMessages.join('');
+    }
+
+    // --- MediaPipe / Camera Initialization and Loop (Omitted for brevity) ---
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise(r => {
+        if (video.readyState >= 2 && video.videoWidth) return r();
+        video.onloadeddata = () => r();
+      });
+
+      ensureSizedToVideo();
+      fitStageToScreen();
+      statusEl.textContent = "Camera ready";
+    }
+
+    window.addEventListener("resize", fitStageToScreen);
+    video.addEventListener("resize", () => {
+      ensureSizedToVideo();
+      fitStageToScreen();
+    });
+
+    let lastVideoTime = -1;
+    function startLive() {
+      if (rafId) return;
+      statusEl.textContent = "Live…";
+      const loop = () => {
+        if (!chkLive.checked) { 
+          rafId = null; 
+          statusEl.textContent = "Camera ready"; 
+          clearOverlay(); 
+          return; 
+        }
+        if (video.readyState >= 2 && handLandmarker) {
+          ensureSizedToVideo();
+          const now = performance.now();
+          const videoTime = video.currentTime;
+
+          let result = null;
+          if (videoTime !== lastVideoTime) {
+              result = handLandmarker.detectForVideo(video, now);
+              lastVideoTime = videoTime;
+          }
+          drawResults(result, Date.now()); 
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+
+    async function initModel() {
+      statusEl.textContent = "Loading model…";
+      const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      
+      const { FilesetResolver } = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js");
+
+      let resolver = await FilesetResolver.forVisionTasks(wasmBase);
+      handLandmarker = await HandLandmarker.createFromOptions(resolver, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        numHands: 2,
+        runningMode: "VIDEO",
+      });
+      statusEl.textContent = "Model ready";
+    }
+
+    // ---- UI wiring ----
+    btnStart.addEventListener("click", async () => {
+      btnStart.disabled = true;
+      try {
+        await initModel(); 
+        await startCamera();
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error starting camera/model";
+        btnStart.disabled = false;
+        return;
+      }
+      statusEl.textContent = "Ready";
+    });
+
+    chkLive.addEventListener("change", () => {
+      if (!handLandmarker || !video.srcObject) {
+        chkLive.checked = false;
+        return;
+      }
+      if (chkLive.checked) startLive();
+      else if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+        statusEl.textContent = "Camera ready";
+        clearOverlay();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>HoloKeys V22: Max Search Distance Halved to 30</title>
+  <title>HoloKeys</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     /* Base CSS Styles for clean, responsive layout */
@@ -64,29 +64,19 @@
 
     /* Status text colors for log */
     .fallback-text { color: #dc2626; font-weight: bold; } /* M5 Fallback: Red */
-    .default-text { color: #f97316; font-weight: bold; } /* M1/M2: Orange */
+    .default-text { color: #f97316; font-weight: bold; } 
     .gradient-text { color: #3b82f6; font-weight: bold; } /* M5 Gradient: Blue */
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js"></script>
 </head>
 <body>
-  <header><strong>HoloKeys V22: Max Search Distance Halved to 30</strong></header>
+  <header><strong>HoloKeys</strong></header>
 
   <main class="container">
     <div class="toolbar" id="toolbar">
       <button id="btnStart">Start Camera</button>
       <label><input type="checkbox" id="chkLive"> Live Detect</label>
       
-      <label for="selectMethod">Fingertip Method:</label>
-      <select id="selectMethod">
-          <option value="GRADIENT_CHANGE" selected>Method 5: Color Change Gradient (RGB+HSL)</option>
-          <option value="PROJECTION">Method 2: Proportional Projection</option>
-          <option value="LANDMARK_TIP">Method 1: Landmark Tip (Baseline)</option>
-      </select>
-      
-      <label>M5 Grad. Thresh: <input type="number" id="inputGradientThreshold" value="30" min="1" max="255" style="width: 50px;"></label>
-      <label>Proportion Factor: <input type="number" step="0.5" id="inputExtensionFactor" value="0.35" min="0.1" max="5.0" style="width: 50px;"></label>
-
       <span class="status" id="status">Idle</span>
     </div>
 
@@ -98,7 +88,7 @@
     </div>
 
     <div class="log-panel">
-        <strong>Refined Fingertip Position Log</strong>
+        <strong>Refined Fingertip Position Log (Method 5: Gradient Search with M2 Fallback)</strong>
         <div id="contactLog" style="margin-top: 5px; padding: 5px; background: #fff; height: 100px; overflow-y: scroll; border-radius: 4px; font-family: monospace; font-size: 0.875rem;">
             Tracking not active.
         </div>
@@ -128,9 +118,22 @@
     const DEFAULT_TIP_COLOR = '#f97316';    // Orange (M1/M2)
     
     // M5 Constants
-    const M5_MAX_SEARCH_DIST = 30; // CHANGED: Halved from 60 to 30 pixels
+    const M5_MAX_SEARCH_DIST = 30; // Max distance for gradient search
     const M5_LOOKAHEAD = 5;       
     const M5_MIN_SUCCESS_DIST = 5; 
+    
+    // FIXED CONFIGURATION VALUES
+    const GRADIENT_THRESHOLD = 30;
+    const EXTENSION_FACTOR = 0.35;
+
+    // Connections for the hand skeleton (standard MediaPipe)
+    const HAND_CONNECTIONS = [
+        [0, 1], [1, 2], [2, 3], [3, 4],       // Thumb
+        [0, 5], [5, 6], [6, 7], [7, 8],       // Index
+        [0, 9], [9, 10], [10, 11], [11, 12],  // Middle
+        [0, 13], [13, 14], [14, 15], [15, 16], // Ring
+        [0, 17], [17, 18], [18, 19], [19, 20]  // Pinky
+    ];
 
     // DOM Elements
     const video     = document.getElementById("video");
@@ -138,9 +141,6 @@
     const octx      = overlay.getContext("2d");
     const tempCanvas = document.getElementById("tempCanvas");
     const tctx      = tempCanvas.getContext("2d");
-    const inputGradientThreshold = document.getElementById("inputGradientThreshold");
-    const inputExtensionFactor = document.getElementById("inputExtensionFactor");
-    const selectMethod = document.getElementById("selectMethod");
     const contactLog = document.getElementById("contactLog");
     const statusEl = document.getElementById("status");
     const btnStart = document.getElementById("btnStart");
@@ -263,9 +263,6 @@
       const vecY = pTip.y - pBase.y;
       const length = Math.sqrt(vecX * vecX + vecY * vecY); 
       
-      // Get adjustable factor, defaults to the value set in HTML (now 0.35)
-      const EXTENSION_FACTOR = parseFloat(inputExtensionFactor.value) || 0.35; 
-
       if (length < 1) return null; 
       const unitX = vecX / length; 
       const unitY = vecY / length; 
@@ -306,7 +303,6 @@
     function findGradientTip(roiData) {
         const videoW = video.videoWidth;
         const videoH = video.videoHeight;
-        const GRADIENT_THRESHOLD = parseInt(inputGradientThreshold.value, 10) || 30;
 
         // Draw the full frame to the hidden canvas to get pixel data
         tempCanvas.width = videoW;
@@ -326,7 +322,7 @@
         octx.moveTo(tipX, tipY);
         
         // 1. Iterate outwards along the projection vector
-        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) { // M5_MAX_SEARCH_DIST is now 30
+        for (let dist = 1; dist < M5_MAX_SEARCH_DIST; dist += 1) { 
             const currentX = Math.round(tipX + unitX * dist);
             const currentY = Math.round(tipY + unitY * dist);
 
@@ -386,14 +382,46 @@
 
 
     // --- Drawing Functions ---
-    
-    function drawFinalTip(point, name, selectedMethod) {
-        let markerColor = DEFAULT_TIP_COLOR; 
 
-        // Determine color based on selected method and calculated source
-        if (selectedMethod === 'GRADIENT_CHANGE') {
-            markerColor = point.source.includes('Fallback') ? FALLBACK_COLOR : GRADIENT_COLOR;
-        }
+    function drawHandLandmarks(landmarks) {
+        const w = overlay.width;
+        const h = overlay.height;
+
+        // 1. Draw connections (lines) in gray
+        octx.strokeStyle = '#666'; 
+        octx.lineWidth = 1;
+
+        octx.beginPath();
+        HAND_CONNECTIONS.forEach(([startIdx, endIdx]) => {
+            const start = landmarks[startIdx];
+            const end = landmarks[endIdx];
+            
+            // Convert normalized coordinates (0-1) to pixel coordinates
+            const startX = start.x * w;
+            const startY = start.y * h;
+            const endX = end.x * w;
+            const endY = end.y * h;
+
+            octx.moveTo(startX, startY);
+            octx.lineTo(endX, endY);
+        });
+        octx.stroke();
+
+        // 2. Draw points (dots) in gray
+        octx.fillStyle = '#666'; 
+        landmarks.forEach(point => {
+            const x = point.x * w;
+            const y = point.y * h;
+            
+            octx.beginPath();
+            octx.arc(x, y, 4, 0, 2 * Math.PI); // Radius 4
+            octx.fill();
+        });
+    }
+    
+    function drawFinalTip(point, name) {
+        // Since the method is fixed to M5, we only need to check for fallback
+        const markerColor = point.source.includes('Fallback') ? FALLBACK_COLOR : GRADIENT_COLOR;
 
         octx.fillStyle = markerColor; 
         octx.beginPath();
@@ -410,7 +438,6 @@
 
     // ---- Main Drawing and Detection Loop ----
     function drawResults(result) {
-      const selectedMethod = selectMethod.value;
       if (result?.landmarks?.length) {
           lastGoodResult = result;
       }
@@ -427,6 +454,10 @@
 
       // Loop through each hand detected
       resultToDraw.landmarks.forEach((handLandmarks, handIndex) => {
+        
+        // ** DRAW LANDMARKS FIRST **
+        drawHandLandmarks(handLandmarks); 
+        
         const handLabel = `Hand ${handIndex + 1}`;
         logMessages.push(`<span class="log-hand-label">${handLabel}</span>`);
 
@@ -437,36 +468,15 @@
 
             if (!roiData) continue;
             
-            let finalTip = null;
-            
-            if (selectedMethod === 'LANDMARK_TIP') {
-                finalTip = { 
-                    x: roiData.landmarkTipX, 
-                    y: roiData.landmarkTipY, 
-                    source: 'Landmark Tip (M1)', 
-                };
-            } 
-            
-            else if (selectedMethod === 'PROJECTION') {
-                finalTip = { 
-                    x: roiData.projectionX, 
-                    y: roiData.projectionY, 
-                    source: 'Projection (M2)', 
-                };
-            }
-
-            else if (selectedMethod === 'GRADIENT_CHANGE') {
-                 // Method 5: Color Change Gradient (with M2 fallback)
-                 finalTip = findGradientTip(roiData);
-            }
+            let finalTip = findGradientTip(roiData);
             
             // Draw the final marker and log the result
             if (finalTip) {
-                drawFinalTip(finalTip, config.name, selectedMethod);
+                drawFinalTip(finalTip, config.name); 
 
                 const statusClass = finalTip.source.includes('Fallback') ? 'fallback-text'
                                   : finalTip.source.includes('Gradient') ? 'gradient-text'
-                                  : 'default-text';
+                                  : 'default-text'; 
 
                 logMessages.push(
                     `<div>- ${config.name} (<span class="${statusClass}">${finalTip.source}</span>): X:${finalTip.x.toFixed(1)}, Y:${finalTip.y.toFixed(1)}</div>`
