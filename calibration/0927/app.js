@@ -20,6 +20,7 @@ const liveChk  = document.getElementById('live');
 const showHandsChk = document.getElementById('showHands');
 const showDebugChk = document.getElementById('showDebug');
 const blackChk = document.getElementById('blackMode');
+const whiteChk = document.getElementById('whiteMode'); 
 const recalBtn = document.getElementById('recalibrate');
 const statusEl = document.getElementById('status');
 
@@ -215,34 +216,44 @@ const normalDown=dir=>{const n=vrot90(dir); return (vdot(n,{x:0,y:1})>=0)?n:vmul
 const FINGER_TIPS  = [4, 8, 12, 16, 20];                     // thumb,index,middle,ring,pinky
 const FINGER_NAMES = ['Thumb','Index','Middle','Ring','Pinky'];
 
-// Build all key cells (their 4 corners) for the current quad
+
 function buildKeyCells(q) {
   if (!q) return [];
   const cells = [];
   const R = ROWS.length;
+
   for (let r = 0; r < R; r++) {
     const row = ROWS[r];
     const vBot = r / R;
     const vTop = (r + 1) / R;
-    const totalW = (row.offset || 0) + row.keys.reduce((s,k)=>s+(k.w||1), 0);
-    let cursor = row.offset || 0;
 
-    for (const k of row.keys) {
-      const w = k.w || 1;
-      const u0 = cursor / totalW;
-      const u1 = (cursor + w) / totalW;
+    // <-- use the new aligned layout
+    const segments = computeRowKeyIntervals(row, r, HOME_LETTER_INFO);
+
+    for (const seg of segments) {
+      const k = seg.key;
+      const u0 = seg.u0;
+      const u1 = seg.u1;
+
       const p0 = mapRectToQuad(u0, vTop, q); // TL
       const p1 = mapRectToQuad(u1, vTop, q); // TR
       const p2 = mapRectToQuad(u1, vBot, q); // BR
       const p3 = mapRectToQuad(u0, vBot, q); // BL
+
       const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
       const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
-      cells.push({ label: k.label, poly: [p0,p1,p2,p3], center:{x:cx,y:cy} });
-      cursor += w;
+
+      cells.push({
+        label: k.label,
+        poly: [p0, p1, p2, p3],
+        center: { x: cx, y: cy }
+      });
     }
   }
+
   return cells;
 }
+
 
 function pointInConvexPolygon(pt, poly) {
   // Works for TL→TR→BR→BL order we generate
@@ -371,6 +382,176 @@ function findHomeRowIndex() {
   return Math.floor(ROWS.length/2);
 }
 
+function getAlignedKeyCenterU(rowIndex, label) {
+  const row = ROWS[rowIndex];
+
+  // if aligned layout is available, use it
+  if (typeof computeRowKeyIntervals === 'function' &&
+      typeof HOME_LETTER_INFO !== 'undefined') {
+    const segs = computeRowKeyIntervals(row, rowIndex, HOME_LETTER_INFO);
+    const seg = segs.find(s => s.key.label === label);
+    if (seg) {
+      return (seg.u0 + seg.u1) / 2;
+    }
+  }
+
+  // fallback to original per-row math
+  return uCenterInRow(row, label);
+}
+
+// --- keep Q/A/Z columns aligned across rows ---
+// rows 1,2,3 in ROWS = QWERTY, home, ZXCV in your current file
+//const LETTER_ROW_INDICES = new Set([1, 2, 3]);
+const LETTER_ROW_INDICES = new Set([0, 1, 2, 3]);
+
+// how much to shift each letter row, in *columns* (not in px)
+// 1 = whole key width, 0.5 = half key width
+// mac-style: A and Z rows are to the RIGHT of Q row by about half a key
+const LETTER_ROW_STAGGER_COLS = {
+  0: -0.5,   // number row sits right over Q
+  1: 0.0,   // row 1 → QWERTY → base, no shift
+  2: 0.28,   // row 2 → ASDF   → half-key to the right
+  3: 0.75,   // row 3 → ZXCV   → same as ASDF
+};
+
+// treat these as “letterish” so they share the same columns
+// function isLetterishLabel(label) {
+//   return /^[A-Z]$/.test(label) || [';', ',', '.', '/'].includes(label);
+// }
+function isLetterishLabel(label) {
+  // letters OR digits OR the small punctuation we put in the letter block
+  return /^[A-Z]$/.test(label) ||
+         /^[0-9]$/.test(label) ||
+         [';', ',', '.', '/'].includes(label);
+}
+
+
+// look at the home row (the one with F/J) and find the exact span
+// that covers its letters — we will reuse this span for the other rows
+function computeHomeLetterInfo() {
+  const homeIndex = findHomeRowIndex();
+  const row = ROWS[homeIndex];
+  const total = rowTotalUnits(row);
+
+  let cursor = row.offset || 0;
+  let firstU = null;
+  let lastU = null;
+  let count = 0;
+
+  for (const k of row.keys) {
+    const w = k.w || 1;
+    if (isLetterishLabel(k.label)) {
+      if (firstU === null) firstU = cursor / total;
+      lastU = (cursor + w) / total;
+      count++;
+    }
+    cursor += w;
+  }
+
+  // fallback guard
+  return {
+    homeIndex,
+    u0: firstU ?? 0.2,
+    u1: lastU ?? 0.8,
+    letterCount: count,
+  };
+}
+
+const HOME_LETTER_INFO = computeHomeLetterInfo();
+
+
+function computeRowKeyIntervals(row, rowIndex, letterInfo) {
+  const total = rowTotalUnits(row);
+
+  // rows that we DON'T normalize/stagger → old behavior
+  if (!letterInfo || !LETTER_ROW_INDICES.has(rowIndex)) {
+    let cursor = row.offset || 0;
+    return row.keys.map((k) => {
+      const w = k.w || 1;
+      const u0 = cursor / total;
+      const u1 = (cursor + w) / total;
+      cursor += w;
+      return { key: k, u0, u1 };
+    });
+  }
+
+  // --- we ARE in a letter row → lock to home-row span ---
+  const { u0: baseL0, u1: baseL1 } = letterInfo;
+
+  // split this row into 3 chunks: left stuff, letters, right stuff
+  const left = [];
+  const letters = [];
+  const right = [];
+  let seenLetter = false;
+  for (const k of row.keys) {
+    const w = k.w || 1;
+    const isL = isLetterishLabel(k.label);
+    if (isL) {
+      seenLetter = true;
+      letters.push({ key: k, w });
+    } else if (!seenLetter) {
+      left.push({ key: k, w });
+    } else {
+      right.push({ key: k, w });
+    }
+  }
+
+  const N = letters.length || 1;
+  const colW = (baseL1 - baseL0) / N;
+
+  // how many columns to shift this *whole row* by (mac-style stagger)
+  const staggerCols = LETTER_ROW_STAGGER_COLS[rowIndex] || 0;
+  let letterStart = baseL0 + staggerCols * colW;
+  let letterEnd   = letterStart + N * colW;
+
+  // clamp so we don't spill past 0..1
+  if (letterStart < 0) {
+    letterEnd -= letterStart;
+    letterStart = 0;
+  }
+  if (letterEnd > 1) {
+    const over = letterEnd - 1;
+    letterStart -= over;
+    letterEnd = 1;
+  }
+
+  const intervals = [];
+
+  // 1) LEFT group → [0, letterStart)
+  const leftTotal = left.reduce((s, x) => s + x.w, 0) || 1;
+  let acc = 0;
+  for (const item of left) {
+    const u0 = letterStart * (acc / leftTotal);
+    const u1 = letterStart * ((acc + item.w) / leftTotal);
+    intervals.push({ key: item.key, u0, u1 });
+    acc += item.w;
+  }
+
+  // 2) LETTER group → evenly spaced in [letterStart, letterEnd)
+  for (let i = 0; i < N; i++) {
+    const item = letters[i];
+    const u0 = letterStart + (letterEnd - letterStart) * (i / N);
+    const u1 = letterStart + (letterEnd - letterStart) * ((i + 1) / N);
+    intervals.push({ key: item.key, u0, u1 });
+  }
+
+  // 3) RIGHT group → [letterEnd, 1]
+  const rightTotal = right.reduce((s, x) => s + x.w, 0) || 1;
+  acc = 0;
+  for (const item of right) {
+    const u0 = letterEnd + (1 - letterEnd) * (acc / rightTotal);
+    const u1 = letterEnd + (1 - letterEnd) * ((acc + item.w) / rightTotal);
+    intervals.push({ key: item.key, u0, u1 });
+    acc += item.w;
+  }
+
+  // keep left → letters → right order
+  intervals.sort((a, b) => a.u0 - b.u0);
+  return intervals;
+}
+
+
+
 // ---------- Geometry solve so F/J land on HOME row centers ----------
 /**
  * Given F and J fingertip points in *screen coords* (already mirrored if preview is),
@@ -390,8 +571,10 @@ function computeQuadFromFJ(F, J){
   const homeRow = ROWS[homeIdx];
 
   // Horizontal fractions for F and J within the *home row* as drawn
-  const uF = uCenterInRow(homeRow, 'F');
-  const uJ = uCenterInRow(homeRow, 'J');
+  // const uF = uCenterInRow(homeRow, 'F');
+  // const uJ = uCenterInRow(homeRow, 'J');
+  const uF = getAlignedKeyCenterU(homeIdx, 'F');
+  const uJ = getAlignedKeyCenterU(homeIdx, 'J');
   const deltaU = uJ - uF;                      // F→J span in row-fraction
 
   // Perspective: top vs bottom width (user-adjustable)
@@ -460,11 +643,13 @@ function isSpecial(labelRaw){
   return specials.has(label) || specials.has(labelRaw);
 }
 
-function drawKeyboard(q){
+
+function drawKeyboard(q) {
   if (!q) return;
 
-  // Estimate key height using the home-row band center
   const R = ROWS.length;
+
+  // estimate label size from home row as before
   const homeRowIdx = ROWS.findIndex(row => row.keys.some(k => k.label === 'F'));
   const vBandTop = (homeRowIdx + 2/3) / R;
   const vBandBot = (homeRowIdx + 1/3) / R;
@@ -473,53 +658,44 @@ function drawKeyboard(q){
   const keyHeightPx = Math.hypot(pTop.x - pBot.x, pTop.y - pBot.y);
   const labelSize = keyHeightPx * 0.64;
 
-  // Draw rows, bottom → top
   for (let r = 0; r < R; r++) {
     const row = ROWS[r];
     const vBot = r / R;
     const vTop = (r + 1) / R;
 
-    // Row normalization to [0..1]
-    const totalW = (row.offset || 0) + row.keys.reduce((s,k)=>s+(k.w||1), 0);
-    let cursor = row.offset || 0;
+    // <-- use aligned layout
+    const segments = computeRowKeyIntervals(row, r, HOME_LETTER_INFO);
 
-    for (const k of row.keys) {
-      const w = k.w || 1;
-      const u0 = cursor / totalW;
-      const u1 = (cursor + w) / totalW;
+    for (const seg of segments) {
+      const k = seg.key;
+      const u0 = seg.u0;
+      const u1 = seg.u1;
 
-      // 4 corners of the key cell in screen space
       const p0 = mapRectToQuad(u0, vTop, q); // TL
       const p1 = mapRectToQuad(u1, vTop, q); // TR
       const p2 = mapRectToQuad(u1, vBot, q); // BR
       const p3 = mapRectToQuad(u0, vBot, q); // BL
 
-      // Styling
       const special = isSpecial(k.label);
       octx.lineWidth = special ? 2 : 1.25;
       octx.strokeStyle = special ? 'rgba(0,120,0,0.95)' : 'rgba(0,128,255,0.6)';
       octx.fillStyle   = special ? 'rgba(0,120,0,0.14)' : 'rgba(0,128,255,0.14)';
 
-      // Outline & fill
       drawPolygon([p0, p1, p2, p3]);
       octx.fill();
 
-      // Label (overlay not mirrored)
       octx.fillStyle = '#0a0a0a';
-      drawLabelAtCenter([p0,p1,p2,p3], k.label, labelSize);
+      drawLabelAtCenter([p0, p1, p2, p3], k.label, labelSize);
 
-      // Emphasize F/J
       if (k.label === 'F' || k.label === 'J') {
         octx.strokeStyle = 'rgba(0,200,0,0.95)';
         octx.lineWidth = 2.25;
-        drawPolygon([p0,p1,p2,p3]);
+        drawPolygon([p0, p1, p2, p3]);
       }
-
-      cursor += w;
     }
   }
 
-  // Debug: fingertip crosses
+  // existing debug crosses
   if (showDebugChk.checked && fjCalib) {
     octx.strokeStyle = 'rgba(0,255,255,0.95)';
     octx.lineWidth = 2;
@@ -535,6 +711,7 @@ function drawKeyboard(q){
     drawX(fjCalib.J);
   }
 }
+
 
 // ---------- MediaPipe Hands ----------
 const vision = await FilesetResolver.forVisionTasks(
@@ -630,9 +807,20 @@ function updateCalibration(result, nowMs){
 }
 
 // ---------- Black screen toggle ----------
+// function updateBlackMode() {
+//   overlay.style.background = blackChk.checked ? '#000' : 'transparent';
+// }
+// ---------- Screen color toggle ----------
 function updateBlackMode() {
-  overlay.style.background = blackChk.checked ? '#000' : 'transparent';
+  if (blackChk && blackChk.checked) {
+    overlay.style.background = '#000';
+  } else if (whiteChk && whiteChk.checked) {
+    overlay.style.background = '#fff';
+  } else {
+    overlay.style.background = 'transparent';
+  }
 }
+
 
 // ---------- Calibration control ----------
 function startCalibration() {
@@ -711,7 +899,23 @@ camSel.addEventListener('change', async () => {
 });
 stopBtn.addEventListener('click', () => { stopStream(); clearOverlay(); });
 snapBtn.addEventListener('click', downloadSnapshot);
-blackChk.addEventListener('change', updateBlackMode);
+// blackChk.addEventListener('change', updateBlackMode);
+blackChk.addEventListener('change', () => {
+  if (blackChk.checked && whiteChk) {
+    whiteChk.checked = false;         // make them exclusive
+  }
+  updateBlackMode();
+});
+
+if (whiteChk) {
+  whiteChk.addEventListener('change', () => {
+    if (whiteChk.checked && blackChk) {
+      blackChk.checked = false;       // make them exclusive
+    }
+    updateBlackMode();
+  });
+}
+
 recalBtn.addEventListener('click', () => { startCalibration(); });
 
 // Height slider
