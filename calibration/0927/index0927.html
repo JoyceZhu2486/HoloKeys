@@ -40,20 +40,39 @@
     <button id="recalibrate" class="pill">Recalibrate</button>
 
     <!-- Height slider + Default -->
-    <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
+    <!-- <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
       Height
       <input type="range" id="height" min="0.60" max="1.80" step="0.02" value="1.00">
       <span id="heightVal">100%</span>
+    </label>
+    <button id="heightDefault" class="pill">Default</button> -->
+
+    <!-- Top/Bottom ratio slider + Default -->
+    <!-- <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
+      Top/Bottom
+      <input type="range" id="ratio" min="0.40" max="1.40" step="0.02" value="0.65">
+      <span id="ratioVal">0.65</span>
+    </label>
+    <button id="ratioDefault" class="pill">Default</button> -->
+
+    <!-- Height slider + Default -->
+    <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
+      Height
+      <!-- center 0.60 between 0.30 and 0.90 -->
+      <input type="range" id="height" min="0.30" max="0.90" step="0.02" value="0.60">
+      <span id="heightVal">60%</span>
     </label>
     <button id="heightDefault" class="pill">Default</button>
 
     <!-- Top/Bottom ratio slider + Default -->
     <label class="pill" style="display:flex;align-items:center;gap:.5rem;">
       Top/Bottom
-      <input type="range" id="ratio" min="0.40" max="1.40" step="0.02" value="0.65">
-      <span id="ratioVal">0.65</span>
+      <!-- center 0.74 between 0.40 and 1.08 -->
+      <input type="range" id="ratio" min="0.40" max="1.08" step="0.02" value="0.74">
+      <span id="ratioVal">0.74</span>
     </label>
     <button id="ratioDefault" class="pill">Default</button>
+
 
     <span class="sep"></span>
     <span class="pill" id="status">Idle</span>

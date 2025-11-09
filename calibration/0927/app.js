@@ -98,8 +98,53 @@ const ROWS = [
 ];
 
 // Tuning (defaults)
+// const VERTICAL_SCALE = 1.0;  // vertical pitch relative to horizontal pitch
+// const MIN_SEP_PX = 80;       // minimum F–J separation to accept calibration
+
+// Tuning (defaults)
 const VERTICAL_SCALE = 1.0;  // vertical pitch relative to horizontal pitch
 const MIN_SEP_PX = 80;       // minimum F–J separation to accept calibration
+
+// Non-uniform vertical layout per row (bottom → top)
+let rowVBottom = [];
+let rowVTop = [];
+
+// Compute v-intervals [vBottom, vTop] for each row given current topShrink.
+// Bottom row height = 1, next row = a, then a^2, ..., where a^(R-1) = topShrink.
+function recomputeRowVerticalLayout() {
+  const R = ROWS.length;
+  if (R === 0) {
+    rowVBottom = [];
+    rowVTop = [];
+    return;
+  }
+
+  const steps = Math.max(1, R - 1);
+  const ratio = Math.max(0.05, topShrink);           // keep positive
+  const a = Math.pow(ratio, 1 / steps);              // per-row factor
+
+  const rawHeights = [];
+  let sum = 0;
+  for (let r = 0; r < R; r++) {
+    const h = Math.pow(a, r);                        // 1, a, a^2, ...
+    rawHeights.push(h);
+    sum += h;
+  }
+
+  rowVBottom = new Array(R);
+  rowVTop = new Array(R);
+  let acc = 0;
+  for (let r = 0; r < R; r++) {
+    const frac = rawHeights[r] / sum;                // normalize to sum = 1
+    rowVBottom[r] = acc;
+    acc += frac;
+    rowVTop[r] = acc;
+  }
+  // avoid tiny floating drift
+  rowVTop[R - 1] = 1.0;
+}
+
+
 
 // ---------- State ----------
 let stream = null;
@@ -114,9 +159,15 @@ let calibStartMs = null;
 let handLandmarker = null;
 let drawer = null;
 
+// // User-adjustable scales (with defaults)
+// let heightScale = 1.00;   // 1.00 = default height
+// let topShrink   = 0.65;   // width_top / width_bottom (0.65 default trapezoid)
+
 // User-adjustable scales (with defaults)
-let heightScale = 1.00;   // 1.00 = default height
-let topShrink   = 0.65;   // width_top / width_bottom (0.65 default trapezoid)
+let heightScale = 0.60;   // was 1.00
+let topShrink   = 0.74;   // was 0.65
+
+recomputeRowVerticalLayout();
 
 // ---------- UI setters ----------
 function setHeightScale(s) {
@@ -126,12 +177,24 @@ function setHeightScale(s) {
   if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
 }
 
+// function setTopShrink(s) {
+//   const v = Math.max(0.3, Math.min(1.5, Number(s) || 0.65)); // clamp
+//   topShrink = v;
+//   if (ratioVal) ratioVal.textContent = v.toFixed(2);
+//   if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
+// }
+
 function setTopShrink(s) {
   const v = Math.max(0.3, Math.min(1.5, Number(s) || 0.65)); // clamp
   topShrink = v;
   if (ratioVal) ratioVal.textContent = v.toFixed(2);
+
+  // NEW: vertical layout depends on topShrink too
+  recomputeRowVerticalLayout();
+
   if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
 }
+
 
 // ---------- Camera ----------
 async function listCameras() {
@@ -224,8 +287,11 @@ function buildKeyCells(q) {
 
   for (let r = 0; r < R; r++) {
     const row = ROWS[r];
-    const vBot = r / R;
-    const vTop = (r + 1) / R;
+    // const vBot = r / R;
+    // const vTop = (r + 1) / R;
+
+    const vBot = rowVBottom[r] ?? (r / R);
+    const vTop = rowVTop[r]   ?? ((r + 1) / R);
 
     // <-- use the new aligned layout
     const segments = computeRowKeyIntervals(row, r, HOME_LETTER_INFO);
@@ -410,8 +476,8 @@ const LETTER_ROW_INDICES = new Set([0, 1, 2, 3]);
 const LETTER_ROW_STAGGER_COLS = {
   0: -0.5,   // number row sits right over Q
   1: 0.0,   // row 1 → QWERTY → base, no shift
-  2: 0.28,   // row 2 → ASDF   → half-key to the right
-  3: 0.75,   // row 3 → ZXCV   → same as ASDF
+  2: 0.29,   // row 2 → ASDF   → half-key to the right
+  3: 0.76,   // row 3 → ZXCV   → same as ASDF
 };
 
 // treat these as “letterish” so they share the same columns
@@ -565,22 +631,44 @@ function computeQuadFromFJ(F, J){
   const dirTop = vnorm(vsub(J,F));      // left→right along top edge
   const nDown  = normalDown(dirTop);    // toward viewer
 
-  // --- Use real home-row geometry (variable widths + offset) ---
+  // // --- Use real home-row geometry (variable widths + offset) ---
+  // const R = ROWS.length;
+  // const homeIdx = findHomeRowIndex();
+  // const homeRow = ROWS[homeIdx];
+
+  // // Horizontal fractions for F and J within the *home row* as drawn
+  // // const uF = uCenterInRow(homeRow, 'F');
+  // // const uJ = uCenterInRow(homeRow, 'J');
+  // const uF = getAlignedKeyCenterU(homeIdx, 'F');
+  // const uJ = getAlignedKeyCenterU(homeIdx, 'J');
+  // const deltaU = uJ - uF;                      // F→J span in row-fraction
+
+  // // Perspective: top vs bottom width (user-adjustable)
+  // const scaleBottom = 1 / topShrink;           // >1 means bottom wider than top
+  // const vHome = (homeIdx + 0.5) / R;           // exact vertical center of home row
+  // const tHome = 1 - vHome;                     // fraction down from top edge
+
+
   const R = ROWS.length;
   const homeIdx = findHomeRowIndex();
   const homeRow = ROWS[homeIdx];
 
   // Horizontal fractions for F and J within the *home row* as drawn
-  // const uF = uCenterInRow(homeRow, 'F');
-  // const uJ = uCenterInRow(homeRow, 'J');
   const uF = getAlignedKeyCenterU(homeIdx, 'F');
   const uJ = getAlignedKeyCenterU(homeIdx, 'J');
-  const deltaU = uJ - uF;                      // F→J span in row-fraction
+  const deltaU = uJ - uF;
 
   // Perspective: top vs bottom width (user-adjustable)
-  const scaleBottom = 1 / topShrink;           // >1 means bottom wider than top
-  const vHome = (homeIdx + 0.5) / R;           // exact vertical center of home row
-  const tHome = 1 - vHome;                     // fraction down from top edge
+  const scaleBottom = 1 / topShrink;
+
+  // NEW: vertical position of home row center using non-uniform bands
+  const vHomeCenter = (
+    (rowVBottom[homeIdx] ?? (homeIdx / R)) +
+    (rowVTop[homeIdx]   ?? ((homeIdx + 1) / R))
+  ) / 2;
+  const tHome = 1 - vHomeCenter;   // fraction down from top edge
+
+
   const sHome = 1 + tHome * (scaleBottom - 1); // horizontal scale at home row vs top
 
   // Top width so that F↔J at home row matches measured separation
@@ -660,8 +748,11 @@ function drawKeyboard(q) {
 
   for (let r = 0; r < R; r++) {
     const row = ROWS[r];
-    const vBot = r / R;
-    const vTop = (r + 1) / R;
+    // const vBot = r / R;
+    // const vTop = (r + 1) / R;
+
+    const vBot = rowVBottom[r] ?? (r / R);
+    const vTop = rowVTop[r]   ?? ((r + 1) / R);
 
     // <-- use aligned layout
     const segments = computeRowKeyIntervals(row, r, HOME_LETTER_INFO);
@@ -928,19 +1019,34 @@ if (ratioSlider) {
   setTopShrink(ratioSlider.value);                   // initialize UI → state
   ratioSlider.addEventListener('input', (e) => setTopShrink(e.target.value));
 }
+// // Defaults
+// if (heightDefaultBtn) {
+//   heightDefaultBtn.addEventListener('click', () => {
+//     heightSlider.value = '1.00';
+//     setHeightScale('1.00');
+//   });
+// }
+// if (ratioDefaultBtn) {
+//   ratioDefaultBtn.addEventListener('click', () => {
+//     ratioSlider.value = '0.65';
+//     setTopShrink('0.65');
+//   });
+// }
+
 // Defaults
 if (heightDefaultBtn) {
   heightDefaultBtn.addEventListener('click', () => {
-    heightSlider.value = '1.00';
-    setHeightScale('1.00');
+    heightSlider.value = '0.60';
+    setHeightScale('0.60');
   });
 }
 if (ratioDefaultBtn) {
   ratioDefaultBtn.addEventListener('click', () => {
-    ratioSlider.value = '0.65';
-    setTopShrink('0.65');
+    ratioSlider.value = '0.74';
+    setTopShrink('0.74');
   });
 }
+
 
 video.addEventListener('playing', () => requestAnimationFrame(pump));
 window.addEventListener('resize', resizeOverlayToVideo);
