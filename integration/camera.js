@@ -4,7 +4,8 @@ const overlay = document.getElementById('overlay');
 const frameCanvas = document.getElementById('frame');
 const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
 
-const camSel = document.getElementById('cameraSelect');
+// Exported so app.js can wire the selector
+export const camSel = document.getElementById('cameraSelect');
 const btnStop = document.getElementById('btnStop');
 let stream = null;
 let currentDeviceId = null;
@@ -16,11 +17,9 @@ function applyStageSize() {
   const h = video.videoHeight;
   if (!w || !h) return;
 
-  // Size the container so absolutely-positioned children are visible
   stage.style.width  = w + 'px';
   stage.style.height = h + 'px';
 
-  // Make the video and overlay visually match the pixel buffer
   video.style.width  = w + 'px';
   video.style.height = h + 'px';
   overlay.style.width  = w + 'px';
@@ -39,40 +38,38 @@ export async function listCameras() {
     opt.textContent = d.label || `Camera ${i+1}`;
     camSel.appendChild(opt);
   });
-  if (currentDeviceId) camSel.value = currentDeviceId;
+  if (cams.length) {
+    currentDeviceId = cams[0].deviceId;
+    camSel.value = currentDeviceId;
+  }
+  return cams.length;
 }
 
 export function stopStream() {
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  btnStop.disabled = true;
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+  }
+  stream = null;
+  video.srcObject = null;
+  video.style.transform = 'scale(1)';
+  state.usingFront = false;
 }
 
-export async function startStream(constraints) {
-  stopStream();
-  stream = await navigator.mediaDevices.getUserMedia(constraints);
+async function startStream(constraints) {
+  if (stream) stopStream();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    console.warn(`Error getting exact constraints (${err.message}). Trying default.`);
+    const simpleConstraints = { video: true, audio: false };
+    stream = await navigator.mediaDevices.getUserMedia(simpleConstraints);
+  }
+
   video.srcObject = stream;
-
-  // Wait for metadata so videoWidth/Height are valid
-  await new Promise(res => {
-    const onReady = () => { video.removeEventListener('loadedmetadata', onReady); res(); };
-    video.addEventListener('loadedmetadata', onReady);
-  });
+  state.usingFront = constraints?.video?.facingMode?.ideal === 'user';
+  video.style.transform = state.usingFront ? 'scale(-1, 1)' : 'scale(1, 1)';
   await video.play();
-
-  applyStageSize();                    // <-- set sizes right away
-  btnStop.disabled = false;
-  await listCameras();
-
-  usingFront = constraints?.video?.facingMode === 'user'
-            || constraints?.video?.facingMode?.ideal === 'user';
-  state.usingFront = usingFront;
-
-  // Mirror preview for front camera
-  video.style.transform = usingFront ? 'scaleX(-1)' : 'none';
-  overlay.style.transform = 'none';
-
-  // Also re-apply if the stream changes dimensions (rare but safe)
-  video.addEventListener('resize', applyStageSize);
+  video.addEventListener('loadedmetadata', applyStageSize);
 }
 
 export async function startRear() {
@@ -110,9 +107,5 @@ export function onVideoFrame(cb) {
     cb();
     requestAnimationFrame(pump);
   }
-  video.addEventListener('playing', () => requestAnimationFrame(pump));
+  requestAnimationFrame(pump);
 }
-
-camSel.addEventListener('change', async () => { await selectDevice(camSel.value); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') stopStream(); });
-window.addEventListener('pagehide', stopStream);
