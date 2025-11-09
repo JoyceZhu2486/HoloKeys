@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>HoloKeys – Integrated Demo</title>
+  <title>HoloKeys - Integrated Demo</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     :root { color-scheme: light dark; }
@@ -50,27 +50,24 @@
       <label><input type="checkbox" id="chkBlack"> Blackout</label>
       <button id="btnSnap">Snap</button>
 
-      <label><input type="checkbox" id="chkShowHands" checked> Show Hands</label>
-      <label><input type="checkbox" id="chkShowDebug" checked> Show F/J</label>
+      <!-- Match Version A IDs for these two: -->
+      <label><input type="checkbox" id="showHands" checked> Show landmarks</label>
+      <label><input type="checkbox" id="showDebug" checked> Show F/J X</label>
 
       <button id="btnRecal">Recalibrate</button>
     </section>
 
-    <!-- Sliders copied from Version A (same behavior, ranges, and defaults) -->
+    <!-- Sliders (same as Version A) -->
     <section class="toolbar">
-      <!-- Height slider + Default -->
       <label style="display:flex;align-items:center;gap:.5rem;">
         Height
-        <!-- center 0.60 between 0.30 and 0.90 -->
         <input type="range" id="height" min="0.30" max="0.90" step="0.02" value="0.60">
         <span id="heightVal">60%</span>
       </label>
       <button id="heightDefault" type="button">Default</button>
 
-      <!-- Top/Bottom ratio slider + Default -->
       <label style="display:flex;align-items:center;gap:.5rem;">
         Top/Bottom
-        <!-- center 0.74 between 0.40 and 1.08 -->
         <input type="range" id="ratio" min="0.40" max="1.08" step="0.02" value="0.74">
         <span id="ratioVal">0.74</span>
       </label>
