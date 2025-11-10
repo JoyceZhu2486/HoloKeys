@@ -1,6 +1,4 @@
-// app.js — keep B’s camera/hand pipeline; use A’s keyboard geometry & drawing.
-// Typing is disabled during calibration; enabled only after freeze.
-// Show Hands / Show FJ wired to checkboxes like Version A.
+// app.js — integrated build with A-style keyboard + EXACT landmark & fingertip display from fingertip_detection.html
 
 import * as cam from './camera.js';
 import { initHands, detect, refineFingertips } from './fingertips.js';
@@ -36,7 +34,176 @@ const editor = document.getElementById('editor');
 const focusEditorBtn = document.getElementById('focusEditorBtn');
 const clearEditorBtn = document.getElementById('clearEditorBtn');
 
-// Editor helpers (typing gated until frozen)
+// Hidden frame canvas for pixel reads (same as fingertip_detection.html)
+const tempCanvas = document.getElementById('tempCanvas');
+const tctx = tempCanvas.getContext('2d');
+
+// --- Landmark & Fingertip Display: EXACT methods from fingertip_detection.html ---
+
+// MediaPipe connections
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],       // Thumb
+  [0,5],[5,6],[6,7],[7,8],       // Index
+  [0,9],[9,10],[10,11],[11,12],  // Middle
+  [0,13],[13,14],[14,15],[15,16],// Ring
+  [0,17],[17,18],[18,19],[19,20] // Pinky
+];
+
+// Fingertip map (tip index → base joint + label)
+const FINGERTIP_MAP = {
+  4:  { name: "Thumb",  base: 3,  color: '#3b82f6' },
+  8:  { name: "Index",  base: 7,  color: '#22c55e' },
+  12: { name: "Middle", base: 11, color: '#22d3ee' },
+  16: { name: "Ring",   base: 15, color: '#f97316' },
+  20: { name: "Pinky",  base: 19, color: '#ec4899' }
+};
+
+// Colors/params (kept identical)
+const FALLBACK_COLOR = '#dc2626'; // red for M2 fallback
+const GRADIENT_COLOR = '#3b82f6'; // blue for M5 success
+const DEFAULT_TIP_COLOR = '#f97316';
+
+const M5_MAX_SEARCH_DIST = 30;
+const M5_LOOKAHEAD = 5;
+const M5_MIN_SUCCESS_DIST = 5;
+const GRADIENT_THRESHOLD = 30;
+const EXTENSION_FACTOR = 0.35;
+
+// Color helpers (exact)
+function rgbToHsl(r, g, b) {
+  r/=255; g/=255; b/=255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h,s,l=(max+min)/2;
+  if (max===min){ h=s=0; }
+  else {
+    const d=max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    switch(max){
+      case r: h=(g-b)/d + (g<b?6:0); break;
+      case g: h=(b-r)/d + 2; break;
+      case b: h=(r-g)/d + 4; break;
+    }
+    h/=6;
+  }
+  return [h*360, s, l];
+}
+function calculateColorDifference(r1,g1,b1,r2,g2,b2){
+  const diffR=(r1-r2)/255, diffG=(g1-g2)/255, diffB=(b1-b2)/255;
+  const rgbDist=Math.sqrt(diffR*diffR+diffG*diffG+diffB*diffB);
+  const [h1,s1,l1]=rgbToHsl(r1,g1,b1), [h2,s2,l2]=rgbToHsl(r2,g2,b2);
+  let diffH=Math.abs(h1-h2); if (diffH>180) diffH=360-diffH; diffH/=180;
+  const diffS=Math.abs(s1-s2), diffL=Math.abs(l1-l2);
+  return (rgbDist*0.5) + (diffH*0.25) + (diffS*0.125) + (diffL*0.125);
+}
+
+// ROI from tip→base projection (exact)
+function calculateFingertipROI(landmarks, tipIndex, baseIndex){
+  if (!landmarks || landmarks.length<=tipIndex || landmarks.length<=baseIndex) return null;
+  const tip=landmarks[tipIndex], base=landmarks[baseIndex];
+  const w=overlay.width, h=overlay.height;
+  const pTip={x:tip.x*w, y:tip.y*h}, pBase={x:base.x*w, y:base.y*h};
+  const vecX=pTip.x-pBase.x, vecY=pTip.y-pBase.y;
+  const length=Math.sqrt(vecX*vecX+vecY*vecY);
+  if (length<1) return null;
+  const unitX=vecX/length, unitY=vecY/length;
+  const proportionalExtension=length*EXTENSION_FACTOR;
+  const pProjection={ x:pTip.x+unitX*proportionalExtension, y:pTip.y+unitY*proportionalExtension };
+  return {
+    landmarkTipX:pTip.x, landmarkTipY:pTip.y,
+    projectionX:pProjection.x, projectionY:pProjection.y,
+    tipX:pTip.x, tipY:pTip.y, unitX, unitY
+  };
+}
+
+// Gradient search along projection (exact; draws dashed line)
+function findGradientTip(roiData){
+  const videoW=video.videoWidth, videoH=video.videoHeight;
+  tempCanvas.width=videoW; tempCanvas.height=videoH;
+  tctx.drawImage(video, 0, 0, videoW, videoH);
+  const imageData=tctx.getImageData(0, 0, videoW, videoH);
+  const data=imageData.data;
+
+  const { tipX, tipY, unitX, unitY, projectionX, projectionY }=roiData;
+  let finalPoint=null;
+
+  octx.save();
+  octx.strokeStyle=GRADIENT_COLOR;
+  octx.lineWidth=2;
+  octx.setLineDash([5,5]);
+  octx.beginPath();
+  octx.moveTo(tipX, tipY);
+
+  for (let dist=1; dist<M5_MAX_SEARCH_DIST; dist+=1){
+    const currentX=Math.round(tipX+unitX*dist);
+    const currentY=Math.round(tipY+unitY*dist);
+    if (currentX<0||currentX>=videoW||currentY<0||currentY>=videoH) break;
+    const lookAheadX=Math.round(tipX+unitX*(dist+M5_LOOKAHEAD));
+    const lookAheadY=Math.round(tipY+unitY*(dist+M5_LOOKAHEAD));
+    if (lookAheadX<0||lookAheadX>=videoW||lookAheadY<0||lookAheadY>=videoH) break;
+
+    const idx=(currentY*videoW+currentX)*4;
+    const idx2=(lookAheadY*videoW+lookAheadX)*4;
+    if (idx+2>=data.length||idx2+2>=data.length) break;
+
+    const r1=data[idx], g1=data[idx+1], b1=data[idx+2];
+    const r2=data[idx2], g2=data[idx2+1], b2=data[idx2+2];
+    const gradient=calculateColorDifference(r1,g1,b1,r2,g2,b2)*255; // their function returns 0..1; *255 to match threshold scale
+
+    if (gradient>GRADIENT_THRESHOLD){
+      if (dist>M5_MIN_SUCCESS_DIST){
+        finalPoint={x:currentX, y:currentY, source:'Gradient (M5)'};
+        break;
+      }
+    }
+  }
+
+  if (!finalPoint){
+    finalPoint={x:projectionX, y:projectionY, source:'Fallback (M2)'};
+    octx.lineTo(finalPoint.x, finalPoint.y);
+  } else {
+    octx.lineTo(finalPoint.x, finalPoint.y);
+  }
+  octx.stroke();
+  octx.setLineDash([]);
+  octx.restore();
+
+  return finalPoint;
+}
+
+// Draw skeleton (gray) exactly like fingertip_detection.html
+function drawHandLandmarks(landmarks){
+  const w=overlay.width, h=overlay.height;
+  // connections
+  octx.save();
+  if (MIRROR_PREVIEW){ octx.translate(overlay.width,0); octx.scale(-1,1); }
+  octx.strokeStyle='#666'; octx.lineWidth=1;
+  octx.beginPath();
+  HAND_CONNECTIONS.forEach(([a,b])=>{
+    const s=landmarks[a], e=landmarks[b];
+    octx.moveTo(s.x*w, s.y*h); octx.lineTo(e.x*w, e.y*h);
+  });
+  octx.stroke();
+  // points
+  octx.fillStyle='#666';
+  for (const p of landmarks){
+    octx.beginPath(); octx.arc(p.x*w, p.y*h, 4, 0, Math.PI*2); octx.fill();
+  }
+  octx.restore();
+}
+
+// Draw final fingertip marker + label (exact)
+function drawFinalTip(point, name){
+  const markerColor = point.source.includes('Fallback') ? FALLBACK_COLOR : GRADIENT_COLOR;
+  octx.save();
+  octx.fillStyle=markerColor;
+  octx.beginPath(); octx.arc(point.x, point.y, 10, 0, Math.PI*2); octx.fill();
+  octx.strokeStyle='#111'; octx.lineWidth=2; octx.stroke();
+  octx.fillStyle='#fff'; octx.font='bold 14px system-ui';
+  octx.fillText(name, point.x+15, point.y+5);
+  octx.restore();
+}
+
+// ---------------- Existing typing/editor helpers ----------------
 function focusEditor(){ editor.focus(); }
 function setValueAndCaret(text, caretPos){
   const wasFocused = document.activeElement === editor;
@@ -67,36 +234,17 @@ function pressKey(key) {
   }
 }
 
-// Calibration state
+// Calibration state (unchanged)
 let frozen = false;
 let calibStartMs = 0;
 let sumF = {x:0,y:0,count:0};
 let sumJ = {x:0,y:0,count:0};
 let quad = null;      // {LB,RB,TR,TL}
-let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
+let lastFJ = null;    // last frame F/J during calibration
 
 let lastW=0, lastH=0;
 let lastKey = null, lastKeyTime = 0;
 
-// Minimal landmarks drawer (checkbox controlled)
-function drawHands(result, W, H){
-  if (!showHandsChk?.checked) return;
-  const hands = result?.landmarks;
-  if (!hands?.length) return;
-
-  octx.save();
-  if (MIRROR_PREVIEW) { octx.translate(overlay.width, 0); octx.scale(-1, 1); }
-  octx.fillStyle = 'rgba(0,255,0,0.9)';
-  for (const hand of hands) {
-    for (const p of hand) {
-      const x = p.x * W, y = p.y * H;
-      octx.beginPath(); octx.arc(x, y, 2.5, 0, Math.PI*2); octx.fill();
-    }
-  }
-  octx.restore();
-}
-
-// Typing (only after calibration freeze)
 function doTyping(tips, quad){
   if (!quad) return;
   const cells = buildKeyCells(quad);
@@ -104,12 +252,10 @@ function doTyping(tips, quad){
   if (!idx) return;
   const hit = findKeyAtPoint(cells, {x:idx.x, y:idx.y});
   if (!hit) { lastKey = null; return; }
-
   const label = hit.label;
   const now = performance.now();
   if (label === lastKey && (now - lastKeyTime) < 120) return;
   lastKey = label; lastKeyTime = now;
-
   if (label === 'Space') { pressKey('Space'); return; }
   if (label === '↩')     { pressKey('Enter'); return; }
   if (label === '⌫')     { pressKey('Backspace'); return; }
@@ -136,7 +282,7 @@ function doTyping(tips, quad){
     chkBlack.onchange = () => { video.style.opacity = chkBlack.checked ? '0' : '1'; };
     btnRecal.onclick  = startCalibration;
 
-    // Sliders (A behavior)
+    // Sliders
     setHeightScale(heightSlider.value);
     setTopShrink(ratioSlider.value);
     heightSlider.addEventListener('input', e => { setHeightScale(e.target.value); if (frozen) recomputeFromAverages(); });
@@ -206,7 +352,22 @@ function mainLoop(){
   const result = detect();
 
   clearOverlay();
-  drawHands(result, W, H); // respects Show landmarks
+
+  // === Landmark + Fingertip display (from fingertip_detection.html) ===
+  const hands = result?.landmarks || [];
+  for (const handLandmarks of hands){
+    if (showHandsChk?.checked) drawHandLandmarks(handLandmarks); // skeleton/points
+
+    // Fingertips with gradient search & dashed projection
+    for (const tipIndexStr in FINGERTIP_MAP){
+      const tipIndex = parseInt(tipIndexStr, 10);
+      const cfg = FINGERTIP_MAP[tipIndex];
+      const roi = calculateFingertipROI(handLandmarks, tipIndex, cfg.base);
+      if (!roi) continue;
+      const finalTip = findGradientTip(roi);
+      if (finalTip) drawFinalTip(finalTip, cfg.name);
+    }
+  }
 
   const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
 
@@ -239,12 +400,12 @@ function mainLoop(){
     }
   }
 
-  // Draw full keyboard & finger→key tooltips
+  // Draw keyboard & overlays
   drawKeyboard(quad);
   drawKeycaps(quad);
   drawFingerKeyLabels(tips, quad);
 
-  // F/J debug crosses (toggle like A)
+  // F/J debug crosses (toggle)
   if (showDebugChk?.checked) {
     const drawX = (pt, r=6) => {
       octx.beginPath();
@@ -265,7 +426,7 @@ function mainLoop(){
     octx.restore();
   }
 
-  // Typing only after freeze (match A)
+  // Typing only after freeze
   if (frozen && tips && tips.length) {
     doTyping(tips, quad);
   }
