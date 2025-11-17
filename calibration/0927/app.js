@@ -31,6 +31,8 @@ const ratioVal     = document.getElementById('ratioVal');
 
 const heightDefaultBtn = document.getElementById('heightDefault');
 const ratioDefaultBtn  = document.getElementById('ratioDefault');
+const rotationZeroBtn  = document.getElementById('rotationZero');
+const shiftBtn         = document.getElementById('shiftToggle');
 
 const frameCanvas = document.getElementById('frame');
 const frameCtx    = frameCanvas.getContext('2d', { willReadFrequently: true });
@@ -159,6 +161,8 @@ let calibStartMs = null;
 let handLandmarker = null;
 let drawer = null;
 
+let shiftOn = false;   // "Shift / caps" toggle for symbol labels
+
 // // User-adjustable scales (with defaults)
 // let heightScale = 1.00;   // 1.00 = default height
 // let topShrink   = 0.65;   // width_top / width_bottom (0.65 default trapezoid)
@@ -194,6 +198,36 @@ function setTopShrink(s) {
 
   if (fjCalib) quad = computeQuadFromFJ(fjCalib.F, fjCalib.J);
 }
+
+
+// After calibration freezes, snap the F–J baseline to be perfectly horizontal.
+// Keeps the same center and horizontal separation, but removes any tilt caused
+// by the fingertips being at slightly different depths.
+function flattenRotationToZero() {
+  if (!fjCalib || !quad) return;
+  if (!frozen) return;   // only allow once the overlay has frozen
+
+  const F = fjCalib.F;
+  const J = fjCalib.J;
+
+  // Midpoint of the current F/J and their horizontal separation
+  const mx = (F.x + J.x) * 0.5;
+  const my = (F.y + J.y) * 0.5;
+  const halfDx = (J.x - F.x) * 0.5;
+
+  // New, “flattened” F and J: same horizontal span, same center, shared y
+  const Fp = { x: mx - halfDx, y: my };
+  const Jp = { x: mx + halfDx, y: my };
+
+  fjCalib = { F: Fp, J: Jp };
+
+  const q2 = computeQuadFromFJ(fjCalib.F, fjCalib.J);
+  if (q2) {
+    quad = q2;
+    statusEl.textContent = 'Frozen (rotation reset)';
+  }
+}
+
 
 
 // ---------- Camera ----------
@@ -309,8 +343,15 @@ function buildKeyCells(q) {
       const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
       const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
 
+      // cells.push({
+      //   label: k.label,
+      //   poly: [p0, p1, p2, p3],
+      //   center: { x: cx, y: cy }
+      // });
+      const displayLabel = getDisplayLabel(k.label);
+
       cells.push({
-        label: k.label,
+        label: displayLabel,           // what shows in fingertip label
         poly: [p0, p1, p2, p3],
         center: { x: cx, y: cy }
       });
@@ -731,6 +772,22 @@ function isSpecial(labelRaw){
   return specials.has(label) || specials.has(labelRaw);
 }
 
+// Mac-style shifted symbols
+const SHIFT_MAP = {
+  '`':'~',
+  '1':'!','2':'@','3':'#','4':'$','5':'%',
+  '6':'^','7':'&','8':'*','9':'(','0':')',
+  '-':'_','=':'+',
+  '[':'{',']':'}','\\':'|',
+  ';':':',"'":'"',
+  ',':'<','.':'>','/':'?'
+};
+
+function getDisplayLabel(base) {
+  if (!shiftOn) return base;
+  return SHIFT_MAP[base] ?? base;
+}
+
 
 function drawKeyboard(q) {
   if (!q) return;
@@ -772,17 +829,33 @@ function drawKeyboard(q) {
       octx.strokeStyle = special ? 'rgba(0,120,0,0.95)' : 'rgba(0,128,255,0.6)';
       octx.fillStyle   = special ? 'rgba(0,120,0,0.14)' : 'rgba(0,128,255,0.14)';
 
+      // drawPolygon([p0, p1, p2, p3]);
+      // octx.fill();
+
+      // octx.fillStyle = '#0a0a0a';
+      // drawLabelAtCenter([p0, p1, p2, p3], k.label, labelSize);
+
+      // if (k.label === 'F' || k.label === 'J') {
+      //   octx.strokeStyle = 'rgba(0,200,0,0.95)';
+      //   octx.lineWidth = 2.25;
+      //   drawPolygon([p0, p1, p2, p3]);
+      // }
+
       drawPolygon([p0, p1, p2, p3]);
       octx.fill();
 
-      octx.fillStyle = '#0a0a0a';
-      drawLabelAtCenter([p0, p1, p2, p3], k.label, labelSize);
+      const displayLabel = getDisplayLabel(k.label);
 
+      octx.fillStyle = '#0a0a0a';
+      drawLabelAtCenter([p0, p1, p2, p3], displayLabel, labelSize);
+
+      // F/J highlighting still keyed off base label; they never change with shift
       if (k.label === 'F' || k.label === 'J') {
         octx.strokeStyle = 'rgba(0,200,0,0.95)';
         octx.lineWidth = 2.25;
         drawPolygon([p0, p1, p2, p3]);
       }
+
     }
   }
 
@@ -1033,6 +1106,15 @@ if (ratioSlider) {
 //   });
 // }
 
+
+
+function setShift(on) {
+  shiftOn = !!on;
+  if (shiftBtn) {
+    shiftBtn.textContent = shiftOn ? 'Shift (on)' : 'Shift (off)';
+  }
+}
+
 // Defaults
 if (heightDefaultBtn) {
   heightDefaultBtn.addEventListener('click', () => {
@@ -1044,6 +1126,29 @@ if (ratioDefaultBtn) {
   ratioDefaultBtn.addEventListener('click', () => {
     ratioSlider.value = '0.74';
     setTopShrink('0.74');
+  });
+}
+
+// Straighten keyboard: set rotation to 0° after freeze
+if (rotationZeroBtn) {
+  rotationZeroBtn.addEventListener('click', () => {
+    flattenRotationToZero();
+  });
+}
+
+
+
+// Shift toggle
+if (shiftBtn) {
+  setShift(false);  // start in unshifted state
+  shiftBtn.addEventListener('click', () => {
+    setShift(!shiftOn);
+
+    // Force a redraw so labels update immediately even if hands aren’t moving
+    clearOverlay();
+    if (quad) {
+      drawKeyboard(quad);
+    }
   });
 }
 
