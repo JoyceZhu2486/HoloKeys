@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloKeys - Integrated Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 10px 14px; border-bottom: 1px solid #ddd; display:flex; gap:12px; align-items:center; }
+    main { padding: 12px 14px 24px; display:grid; gap:14px; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    button, select, label, input { font:inherit; }
+
+    .stage-wrap {
+      position:relative;
+      display:inline-block;
+      border-radius:12px;
+      overflow:hidden;
+      background:#111;
+      border: 3px solid transparent;
+      transition: box-shadow 0.1s, border 0.1s;
+    }
+    .tap-detected-border {
+      border: 3px solid red;
+      box-shadow: 0 0 8px 2px rgba(255, 0, 0, 0.6);
+    }
+
+    #stage { position:relative; background:#111; }
+    video, canvas { position:absolute; left:0; top:0; }
+
+    .editor-wrap { max-width: 900px; }
+    #editor {
+      width:100%; min-height:200px; padding:10px 12px; border:1px solid #ccc; border-radius:12px;
+      font:inherit;
+    }
+    .row { display:flex; gap:8px; margin-bottom:8px; }
+    .status { background:#eee; color:#333; padding:4px 8px; border-radius:12px; font-size: 0.8em; }
+    label input[type="number"] { width: 80px; }
+
+    .log-panel {
+      max-width: 900px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid #ccc;
+      font-size: 0.85rem;
+      background: rgba(248,248,248,0.9);
+      color: #222;
+      white-space: pre-line;
+      margin-top: 4px;
+    }
+    .log-hand-label {
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .log-line {
+      margin-left: 8px;
+    }
+    .gradient-text {
+      color: #1d4ed8; /* blue-ish for Gradient (M5) */
+    }
+    .fallback-text {
+      color: #b91c1c; /* red-ish for Fallback (M2) */
+    }
+
+    /* Tap log cards */
+    .tap-list {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 4px 0;
+      min-height: 120px;
+    }
+    .tap-record {
+      flex-shrink: 0;
+      width: 140px;
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .tap-record img {
+      width: 100%;
+      display: block;
+      border-bottom: 1px solid #eee;
+    }
+    .tap-record-info {
+      padding: 4px 6px;
+      font-size: 10px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>HoloKeys – Integrated Demo</strong>
+    <span class="status" id="status">Idle</span>
+  </header>
+
+  <main>
+    <!-- Camera + base controls -->
+    <section class="toolbar">
+      <button id="btnStartRear">Start Rear Cam</button>
+      <button id="btnStartFront">Start Front Cam</button>
+      <button id="btnStop" disabled>Stop</button>
+      <select id="cameraSelect" style="max-width: 150px;"></select>
+
+      <label><input type="checkbox" id="chkBlack"> Blackout</label>
+      <button id="btnSnap">Snap</button>
+
+      <!-- Match Version A IDs for these two: -->
+      <label><input type="checkbox" id="showHands" checked> Show landmarks</label>
+      <label><input type="checkbox" id="showDebug" checked> Show F/J X</label>
+      <label><input type="checkbox" id="showTipLog"> Show fingertip log</label>
+      <label><input type="checkbox" id="tapTypingMode"> Tap to type (disable hover)</label>
+ 
+      <button id="btnRecal" type="button">Recalibrate</button>
+    </section>
+
+    <!-- Height / ratio sliders (geometry tuning) -->
+    <section class="toolbar">
+      <label style="display:flex;align-items:center;gap:.5rem;">
+        Height
+        <input type="range" id="height" min="0.30" max="0.90" step="0.02" value="0.60">
+        <span id="heightVal">60%</span>
+      </label>
+      <button id="heightDefault" type="button">Default</button>
+
+      <label style="display:flex;align-items:center;gap:.5rem;">
+        Top/Bottom
+        <input type="range" id="ratio" min="0.40" max="1.08" step="0.02" value="0.74">
+        <span id="ratioVal">0.74</span>
+      </label>
+      <button id="ratioDefault" type="button">Default</button>
+    </section>
+
+    <!-- Tap thresholds -->
+    <section class="toolbar">
+      <label style="display:flex;align-items:center;gap:.5rem;">
+        Tap start speed
+        <input
+          type="number"
+          id="inputSpeedThreshold"
+          min="0.00005"
+          max="0.01"
+          step="0.00005"
+          value="0.00015">
+      </label>
+
+      <label style="display:flex;align-items:center;gap:.5rem;">
+        Min tap distance
+        <input
+          type="number"
+          id="inputDistanceThreshold"
+          min="0.001"
+          max="0.05"
+          step="0.001"
+          value="0.010">
+      </label>
+    </section>
+
+    <!-- Camera preview + keyboard overlay -->
+    <section class="stage-wrap" id="stageWrap">
+      <div id="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+    </section>
+
+    <!-- Fingertip log -->
+    <section class="log-panel" id="tipLogPanel" style="display:none;">
+      <strong>Fingertip Log</strong>
+      <div id="contactLog">Tracking not active.</div>
+    </section>
+
+    <!-- Tap event log -->
+    <section class="log-panel" id="tapLogPanel" style="display:none;">
+      <strong>Tap Events</strong>
+      <div class="tap-list" id="tapList">
+        <div style="padding: 4px 8px; color:#666; font-size:0.8rem;">
+          Tap events will appear here after calibration.
+        </div>
+      </div>
+    </section>
+
+    <!-- Typed text -->
+    <section class="editor-wrap">
+      <div class="row">
+        <button id="focusEditorBtn" type="button">Focus editor</button>
+        <button id="clearEditorBtn" type="button">Clear</button>
+      </div>
+      <textarea id="editor" placeholder="Typed output appears here…"></textarea>
+    </section>
+
+    <!-- Hidden canvases used by camera.js -->
+    <canvas id="frame" style="display:none;"></canvas>
+    <canvas id="tempCanvas" style="display:none;"></canvas>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
