@@ -114,21 +114,30 @@ export function refineFingertips(result, W, H, mirrorPreview=false) {
     const handLabel = (handedness[hi]?.[0]?.categoryName) || 'Unknown'; // 'Left' | 'Right' | 'Unknown'
 
     for (const idxStr of Object.keys(FINGERTIP_MAP)) {
-      const idx = parseInt(idxStr,10);
+      const idx = parseInt(idxStr, 10);
       const { name, base } = FINGERTIP_MAP[idx];
-      if (name !== 'Index') continue; // only need index tips for F/J anchoring & simple typing
+
+      // NOTE: previously we had:
+      // if (name !== 'Index') continue;
+      // That restricted us to Index only. Now we keep ALL fingers.
 
       const roi = calcROI(hand, idx, base, W, H);
       if (!roi) continue;
+
       let pt = findM5Point(roi, W, H);
       if (mirrorPreview) pt.x = W - pt.x;
+
       tips.push({
-        x: pt.x, y: pt.y, finger: name, tag: name[0],
-        source: pt.source,
-        handLabel,       // 'Left' | 'Right' | 'Unknown'
-        handIndex: hi    // 0 or 1 in this frame
+        x: pt.x,
+        y: pt.y,
+        finger: name,      // 'Thumb' | 'Index' | 'Middle' | 'Ring' | 'Pinky'
+        tag: name[0],      // 'T', 'I', 'M', 'R', 'P'
+        source: pt.source, // 'Gradient (M5)' or 'Fallback (M2)'
+        handLabel,         // 'Left' | 'Right' | 'Unknown'
+        handIndex: hi      // 0 or 1 for this frame
       });
     }
   }
+
   return tips;
 }
