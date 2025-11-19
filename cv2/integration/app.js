@@ -743,9 +743,9 @@ function mainLoop(){
   drawFingertipMarkers(tips);
   updateTipLog(result, tips);
 
-  // During calibration: follow fingertips and accumulate averages
+  // During calibration: follow fingertips and maintain sliding 1s window of F/J
   if (!frozen && tips && tips.length){
-    const idx = tips.filter(t=>t.finger==='Index').sort((a,b)=>a.x-b.x);
+    const idx = tips.filter(t => t.finger === 'Index').sort((a,b)=>a.x-b.x);
     if (idx.length >= 2){
       const F = idx[0], J = idx[idx.length-1];
       lastFJ = { F:{x:F.x,y:F.y}, J:{x:J.x,y:J.y} };
@@ -756,15 +756,40 @@ function mainLoop(){
       const now = performance.now();
       if (!calibStartMs) calibStartMs = now;
 
-      // accumulate averages for the eventual freeze
-      sumF.x += F.x; sumF.y += F.y; sumF.count++;
-      sumJ.x += J.x; sumJ.y += J.y; sumJ.count++;
+      // Maintain a sliding window (~last 1s) of F/J positions for freeze.
+      fjSamples.push({ xF: F.x, yF: F.y, xJ: J.x, yJ: J.y, t: now });
+      const cutoff = now - 1000;
+      fjSamples = fjSamples.filter(s => s.t >= cutoff);
 
       const elapsed = (now - calibStartMs)/1000;
       if (elapsed >= 10) {
         frozen = true;
-        recomputeFromAverages(); // lock to averaged F/J
+
+        // At freeze, compute average F/J from the last ~1s of samples.
+        if (fjSamples.length) {
+          let sumFx = 0, sumFy = 0, sumJx = 0, sumJy = 0;
+          const n = fjSamples.length;
+          for (const s of fjSamples) {
+            sumFx += s.xF; sumFy += s.yF;
+            sumJx += s.xJ; sumJy += s.yJ;
+          }
+          frozenF = { x: sumFx / n, y: sumFy / n };
+          frozenJ = { x: sumJx / n, y: sumJy / n };
+        } else if (lastFJ) {
+          // Fallback: if for some reason we have no window, use last frame
+          frozenF = { x: lastFJ.F.x, y: lastFJ.F.y };
+          frozenJ = { x: lastFJ.J.x, y: lastFJ.J.y };
+        } else {
+          frozenF = null;
+          frozenJ = null;
+        }
+
+        // Lock keyboard geometry based on averaged last-1s F/J
+        recomputeFromAverages();
         statusEl.textContent = 'Frozen';
+
+        // Start typing session timer
+        typingSessionStartMs = now;
       } else {
         statusEl.textContent = `Calibrating… ${(10 - elapsed).toFixed(1)}s`;
       }
