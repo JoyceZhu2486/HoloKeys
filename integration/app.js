@@ -32,6 +32,7 @@ const showTipLogChk = document.getElementById('showTipLog');
 const tipLogPanel   = document.getElementById('tipLogPanel');
 const contactLogEl  = document.getElementById('contactLog');
 const btnRecal      = document.getElementById('btnRecal');
+const tapTypingModeChk = document.getElementById('tapTypingMode');
 
 const video   = document.getElementById('video');
 const overlay = document.getElementById('overlay');
@@ -125,6 +126,15 @@ let lastFJ = null;    // {F:{x,y}, J:{x,y}}
 
 let lastW=0, lastH=0;
 let lastKey = null, lastKeyTime = 0;
+
+// Latest raw hand landmarks (normalized coordinates) for tap mapping
+let lastHandsForTap = [];
+
+// ---------- Typing log state ----------
+// (used by typeKeyLabel for both hover + tap typing)
+let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
+let typingSessionStartMs = null; // set when calibration finishes
+
 
 // ---------- Drawing helpers ----------
 
@@ -248,24 +258,114 @@ function updateTipLog(result, tips){
   contactLogEl.innerHTML = html;
 }
 
+function typeKeyLabel(label, source, meta) {
+  const now = performance.now();
+
+  // Shared debounce for both hover + tap so we don't double-type
+  if (label === lastKey && (now - lastKeyTime) < 120) return;
+  lastKey = label;
+  lastKeyTime = now;
+
+  // Logging
+  const tRel = (typingSessionStartMs != null)
+    ? (now - typingSessionStartMs)
+    : now;
+
+  const x         = meta?.x ?? null;
+  const y         = meta?.y ?? null;
+  const handIndex = meta?.handIndex ?? null;
+  const finger    = meta?.finger ?? null;
+
+  typingLog.push({
+    timeMs: tRel,
+    timeAbsMs: now,
+    label,
+    source,            // "hover" or "tap"
+    x, y,
+    handIndex,
+    finger
+  });
+
+  // Actual key behavior (same as your existing doTyping)
+  if (label === 'Space') {
+    pressKey('Space');
+    return;
+  }
+  if (label === '↩') {
+    pressKey('Enter');
+    return;
+  }
+  if (label === '⌫') {
+    pressKey('Backspace');
+    return;
+  }
+  if (label.length === 1) {
+    insertText(label);
+  }
+}
+
 function doTyping(tips, quad){
   if (!quad) return;
   const cells = buildKeyCells(quad);
   const idx = tips.find(t => t.finger === 'Index');
   if (!idx) return;
 
-  const hit = findKeyAtPoint(cells, {x:idx.x, y:idx.y});
+  const hit = findKeyAtPoint(cells, {x: idx.x, y: idx.y});
   if (!hit) { lastKey = null; return; }
 
   const label = hit.label;
-  const now = performance.now();
-  if (label === lastKey && (now - lastKeyTime) < 120) return;
-  lastKey = label; lastKeyTime = now;
 
-  if (label === 'Space') { pressKey('Space'); return; }
-  if (label === '↩')     { pressKey('Enter'); return; }
-  if (label === '⌫')     { pressKey('Backspace'); return; }
-  if (label.length === 1){ insertText(label); }
+  // Use unified helper for logging + key effect
+  typeKeyLabel(label, 'hover', {
+    x: idx.x,
+    y: idx.y,
+    handIndex: idx.handIndex,
+    finger: idx.finger || null
+  });
+}
+
+
+// Convert a tapEvent's fingertip to overlay pixel coordinates, using the
+// last detected landmarks from this frame.
+function getTapOverlayPoint(tapEvent) {
+  if (!overlay || !lastHandsForTap || !lastHandsForTap.length) return null;
+  const { handIndex, fingerIndex } = tapEvent;
+  if (handIndex == null || fingerIndex == null) return null;
+
+  const hand = lastHandsForTap[handIndex];
+  if (!hand || hand.length <= fingerIndex) return null;
+
+  const lm = hand[fingerIndex];
+  if (!lm) return null;
+
+  let xNorm = lm.x;
+  const yNorm = lm.y;
+
+  // Match preview mirroring
+  if (MIRROR_PREVIEW) {
+    xNorm = 1 - xNorm;
+  }
+
+  const x = xNorm * overlay.width;
+  const y = yNorm * overlay.height;
+  return { x, y };
+}
+
+// Use existing keyboard mapping to find which key (if any) is under the tap
+function mapTapToKey(tapEvent) {
+  if (!frozen || !quad) return null;
+
+  const pt = getTapOverlayPoint(tapEvent);
+  if (!pt) return null;
+
+  const cells = buildKeyCells(quad);
+  const hit = findKeyAtPoint(cells, pt);
+  if (!hit) return null;
+
+  return {
+    label: hit.label,
+    point: pt
+  };
 }
 
 // ---------- Tap UI helpers ----------
@@ -273,14 +373,40 @@ function doTyping(tips, quad){
 function flashTapBorder(tapEvent){
   if (!stageWrap) return;
 
+  // Visual feedback: red border flash
   stageWrap.classList.add('tap-detected-border');
   setTimeout(() => {
     stageWrap.classList.remove('tap-detected-border');
   }, 100);
 
-  console.log('[Tap detected]', tapEvent);
-  addTapRecord(tapEvent);
+  // Map tap to key
+  const mapped = mapTapToKey(tapEvent);
+
+  if (mapped) {
+    console.log('[Tap detected → key]', {
+      handIndex: tapEvent.handIndex,
+      fingerIndex: tapEvent.fingerIndex,
+      fingerName: tapEvent.fingerName,
+      speed: tapEvent.speed,
+      motionLength: tapEvent.motionLength,
+      key: mapped.label,
+      point: mapped.point
+    });
+
+    // If tap typing mode is on, actually type the key
+    if (tapTypingModeChk && tapTypingModeChk.checked) {
+      typeKeyLabel(mapped.label, 'tap', {
+        x: mapped.point.x,
+        y: mapped.point.y,
+        handIndex: tapEvent.handIndex,
+        finger: tapEvent.fingerName || null
+      });
+    }
+  } else {
+    console.log('[Tap detected → no key under tap]', tapEvent);
+  }
 }
+
 
 async function addTapRecord(tapEvent){
   if (!tapList) return;
@@ -527,6 +653,9 @@ function mainLoop(){
   const result = detect();
   const nowMs  = performance.now();
 
+  // Save landmarks for tap→key mapping
+  lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
+
   // Tap detection: ONLY when calibration is finished
   if (frozen && result && result.landmarks && result.landmarks.length) {
     const hands    = result.landmarks;
@@ -567,9 +696,14 @@ function mainLoop(){
         frozen = true;
         recomputeFromAverages();
         statusEl.textContent = 'Frozen';
+
+        // Start a new typing session timeline from this moment
+        typingSessionStartMs = performance.now();
+        typingLog = [];
       } else {
         statusEl.textContent = `Calibrating… ${(10 - elapsed).toFixed(1)}s`;
       }
+
     }
   }
 
@@ -599,8 +733,10 @@ function mainLoop(){
     octx.restore();
   }
 
-  // Typing only after freeze
-  if (frozen && tips && tips.length) {
+  // Typing only after freeze.
+  // When tap typing mode is enabled, we disable hover typing to avoid double entries.
+  if (frozen && tips && tips.length &&
+    !(tapTypingModeChk && tapTypingModeChk.checked)) {
     doTyping(tips, quad);
   }
 }
