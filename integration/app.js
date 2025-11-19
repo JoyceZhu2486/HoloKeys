@@ -135,6 +135,10 @@ let lastKey = null, lastKeyTime = 0;
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
 
+// Latest refined fingertip positions (overlay coordinates) for tap mapping
+let lastTipsForTap = [];
+
+
 // ---------- Typing log state ----------
 // (used by typeKeyLabel for both hover + tap typing)
 let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
@@ -336,9 +340,39 @@ function doTyping(tips, quad){
 // Convert a tapEvent's fingertip to overlay pixel coordinates, using the
 // last detected landmarks from this frame.
 function getTapOverlayPoint(tapEvent) {
-  if (!overlay || !lastHandsForTap || !lastHandsForTap.length) return null;
-  const { handIndex, fingerIndex } = tapEvent;
+  if (!overlay) return null;
+  const { handIndex, fingerIndex, fingerName } = tapEvent;
   if (handIndex == null || fingerIndex == null) return null;
+
+  // 1) Prefer refined fingertips from the last frame
+  if (lastTipsForTap && lastTipsForTap.length) {
+    const targetName = fingerName || null;
+
+    let tip = null;
+    if (targetName) {
+      // Match by handIndex + finger name ("Index", "Middle", etc.)
+      tip = lastTipsForTap.find(t =>
+        t.handIndex === handIndex &&
+        (t.finger === targetName || t.fingerName === targetName)
+      );
+    }
+
+    // If name match failed, try matching by handIndex + landmark index, if present
+    if (!tip) {
+      tip = lastTipsForTap.find(t =>
+        t.handIndex === handIndex &&
+        t.landmarkIndex === fingerIndex
+      );
+    }
+
+    if (tip && typeof tip.x === 'number' && typeof tip.y === 'number') {
+      // Refined tips are already in overlay pixel coordinates
+      return { x: tip.x, y: tip.y };
+    }
+  }
+
+  // 2) Fallback: use raw landmarks (normalized) if no refined tip found
+  if (!lastHandsForTap || !lastHandsForTap.length) return null;
 
   const hand = lastHandsForTap[handIndex];
   if (!hand || hand.length <= fingerIndex) return null;
@@ -349,7 +383,6 @@ function getTapOverlayPoint(tapEvent) {
   let xNorm = lm.x;
   const yNorm = lm.y;
 
-  // Match preview mirroring
   if (MIRROR_PREVIEW) {
     xNorm = 1 - xNorm;
   }
@@ -740,8 +773,11 @@ function mainLoop(){
   drawHands(result, W, H); // respects Show landmarks
 
   const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
+  lastTipsForTap = tips;  // <--- NEW: keep for tap mapping
+
   drawFingertipMarkers(tips);
   updateTipLog(result, tips);
+
 
   // During calibration: follow fingertips and maintain sliding 1s window of F/J
   if (!frozen && tips && tips.length){
