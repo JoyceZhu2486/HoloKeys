@@ -117,12 +117,17 @@ function pressKey(key) {
 
 // ---------- Calibration / typing state ----------
 
+// Calibration state
 let frozen = false;
 let calibStartMs = 0;
-let sumF = {x:0,y:0,count:0};
-let sumJ = {x:0,y:0,count:0};
+
+// During calibration, we keep a sliding window (~last 1s) of F/J positions.
+let fjSamples = [];          // each { xF, yF, xJ, yJ, t }
+let frozenF = null;          // averaged F from last 1s at freeze time
+let frozenJ = null;          // averaged J from last 1s at freeze time
+
 let quad = null;      // {LB,RB,TR,TL}
-let lastFJ = null;    // {F:{x,y}, J:{x,y}}
+let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
 
 let lastW=0, lastH=0;
 let lastKey = null, lastKeyTime = 0;
@@ -486,19 +491,45 @@ async function addTapRecord(tapEvent){
 function startCalibration(){
   frozen = false;
   calibStartMs = 0;
-  sumF = {x:0,y:0,count:0};
-  sumJ = {x:0,y:0,count:0};
+
+  // Reset sliding window of F/J samples and frozen averages
+  fjSamples = [];
+  frozenF = null;
+  frozenJ = null;
+
   quad = null;
   lastFJ = null;
   statusEl.textContent = 'Calibrating… (place index fingertips on F and J)';
 }
 
+
 function recomputeFromAverages(){
-  if (sumF.count && sumJ.count){
-    const F = { x: sumF.x / sumF.count, y: sumF.y / sumF.count };
-    const J = { x: sumJ.x / sumJ.count, y: sumJ.y / sumJ.count };
-    quad = computeQuadFromFJ(F, J);
+  // Use the averaged F/J from the last ~1s of calibration.
+  // At freeze time we store them in frozenF/frozenJ; if those are not
+  // available (e.g., during live calibration while sliders change), fall
+  // back to the current sliding window or lastFJ.
+  let F = frozenF;
+  let J = frozenJ;
+
+  if (!F || !J) {
+    if (fjSamples && fjSamples.length) {
+      let sumFx = 0, sumFy = 0, sumJx = 0, sumJy = 0;
+      const n = fjSamples.length;
+      for (const s of fjSamples) {
+        sumFx += s.xF; sumFy += s.yF;
+        sumJx += s.xJ; sumJy += s.yJ;
+      }
+      F = { x: sumFx / n, y: sumFy / n };
+      J = { x: sumJx / n, y: sumJy / n };
+    } else if (lastFJ) {
+      F = { x: lastFJ.F.x, y: lastFJ.F.y };
+      J = { x: lastFJ.J.x, y: lastFJ.J.y };
+    } else {
+      return;
+    }
   }
+
+  quad = computeQuadFromFJ(F, J);
 }
 
 // ---------- Main setup ----------
@@ -721,21 +752,19 @@ function mainLoop(){
 
       quad = computeQuadFromFJ({x:F.x,y:F.y},{x:J.x,y:J.y});
 
+      // start timer on first valid quad
       const now = performance.now();
       if (!calibStartMs) calibStartMs = now;
 
+      // accumulate averages for the eventual freeze
       sumF.x += F.x; sumF.y += F.y; sumF.count++;
       sumJ.x += J.x; sumJ.y += J.y; sumJ.count++;
 
       const elapsed = (now - calibStartMs)/1000;
       if (elapsed >= 10) {
         frozen = true;
-        recomputeFromAverages();
+        recomputeFromAverages(); // lock to averaged F/J
         statusEl.textContent = 'Frozen';
-
-        // Start a new typing session timeline from this moment
-        typingSessionStartMs = performance.now();
-        typingLog = [];
       } else {
         statusEl.textContent = `Calibrating… ${(10 - elapsed).toFixed(1)}s`;
       }
@@ -759,14 +788,11 @@ function mainLoop(){
     octx.save();
     octx.strokeStyle = 'rgba(0,255,255,0.95)';
     octx.lineWidth = 2;
-    if (frozen && sumF.count && sumJ.count) {
-      const F = { x: sumF.x / sumF.count, y: sumF.y / sumF.count };
-      const J = { x: sumJ.x / sumJ.count, y: sumJ.y / sumJ.count };
-      drawX(F); drawX(J);
+    if (frozen && frozenF && frozenJ) {
+      drawX(frozenF); drawX(frozenJ);
     } else if (lastFJ) {
       drawX(lastFJ.F); drawX(lastFJ.J);
     }
-    octx.restore();
   }
 
   // Typing only after freeze.
