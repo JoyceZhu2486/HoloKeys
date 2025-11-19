@@ -135,6 +135,9 @@ let lastHandsForTap = [];
 let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
 let typingSessionStartMs = null; // set when calibration finishes
 
+// Tap candidate log (for threshold tuning)
+let tapCandidateLog = [];  // array of { timeAbsMs, score, speed, motionLength, handIndex, fingerIndex, fingerName, x, y, keyLabel }
+
 
 // ---------- Drawing helpers ----------
 
@@ -368,6 +371,31 @@ function mapTapToKey(tapEvent) {
   };
 }
 
+function logTapCandidate(tapEvent) {
+  // Compute approximate overlay position for this fingertip on this frame
+  const pt     = getTapOverlayPoint(tapEvent);
+  const mapped = mapTapToKey(tapEvent);  // may be null if outside keyboard
+
+  const entry = {
+    timeAbsMs: tapEvent.timestamp,
+    score: tapEvent.score,
+    speed: tapEvent.speed,
+    motionLength: tapEvent.motionLength,
+    dwellFrames: tapEvent.dwellFrames,
+    dwellDurationMs: tapEvent.dwellDurationMs,
+    handIndex: tapEvent.handIndex,
+    fingerIndex: tapEvent.fingerIndex,
+    fingerName: tapEvent.fingerName,
+    x: pt ? pt.x : null,
+    y: pt ? pt.y : null,
+    keyLabel: mapped ? mapped.label : null
+  };
+
+  tapCandidateLog.push(entry);
+  // For quick inspection while tuning:
+  console.log('[Tap candidate]', entry);
+}
+
 // ---------- Tap UI helpers ----------
 
 function flashTapBorder(tapEvent){
@@ -502,9 +530,17 @@ function recomputeFromAverages(){
         // taps are only run after frozen in mainLoop
         flashTapBorder(tapEvent);
       },
+      onTapCandidate: (tapEvent) => {
+        // log ALL candidate taps (including ones below score threshold)
+        logTapCandidate(tapEvent);
+      },
       velocityThreshold: initialSpeed,
       distanceThreshold: initialDistance
     });
+
+    // Optional: make logs accessible from the browser console
+    window.tapCandidateLog = tapCandidateLog;
+
 
     if (inputSpeedThreshold) {
       inputSpeedThreshold.value = String(initialSpeed);
