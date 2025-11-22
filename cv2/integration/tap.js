@@ -343,9 +343,11 @@ function updateFingerStateForTap(
         dwellFrames: state.dwellFrames,
         dwellDurationMs: dwellElapsed,
         score,
-        fingerName: TAP_FINGERTIP_NAMES[fingerIndex] ||
-                    `LM${fingerIndex}`
-      };
+        fingerName: TAP_FINGERTIP_NAMES[fingerIndex] || `LM${fingerIndex}`,
+        // NEW: start/end vertical positions (normalized 0..1, downward = larger)
+        startY: state.startY,
+        finalY: currY
+      };      
 
       // Report ALL candidates to debug callback (for logging/tuning)
       if (onTapCandidateCallback) {
@@ -372,10 +374,11 @@ function updateFingerStateForTap(
   return null;
 }
 
-function checkForTap(timestampMs){
+/**
+ * Core tap detection: update FSMs for all fingertips & gather taps.
+ */
+function checkForTap(){
   const potentialTapEvents = [];
-
-  const canStartNewTap = (timestampMs - lastTapTime) > TAP_DEBOUNCE_DELAY;
 
   for (let handIndex = 0; handIndex < 2; handIndex++) {
     const handTipHistories = tapHistory[handIndex];
@@ -386,56 +389,17 @@ function checkForTap(timestampMs){
       const history = handTipHistories[fingerIndex];
       const state   = handStates[fingerIndex];
       if (!history || !state) continue;
+      if (history.length < 2) continue;
 
-      if (history.length < TAP_HISTORY_LENGTH) continue;
+      const tapEvent = updateFingerStateForTap(
+        handIndex,
+        fingerIndex,
+        history,
+        state
+      );
 
-      const speed = calculateInstantVelocity(history, 3);
-
-      if (!state.active) {
-        // Tap start: speed above threshold, but below max to filter glitches
-        if (canStartNewTap &&
-            speed > tapVelocityThreshold &&
-            speed < TAP_MAX_VELOCITY) {
-          state.active         = true;
-          state.peakSpeed      = speed;
-          state.startY         = history[history.length - 1].y;
-          state.startTimestamp = timestampMs;
-        }
-      } else {
-        // Track peak speed while active
-        if (speed > state.peakSpeed) {
-          state.peakSpeed = speed;
-        }
-
-        const timeSinceStart = timestampMs - state.startTimestamp;
-
-        // Tap end condition
-        if (speed < TAP_STOP_VEL_THRESHOLD &&
-            timeSinceStart > TAP_MIN_DURATION_MS) {
-
-          const endY       = history[history.length - 1].y;
-          const totalYDrop = endY - state.startY;
-
-          // Final success condition
-          if (totalYDrop > minTapDistance &&
-              state.peakSpeed > tapVelocityThreshold) {
-            potentialTapEvents.push({
-              handIndex,
-              fingerIndex,
-              timestamp: timestampMs,
-              speed: state.peakSpeed,
-              motionLength: totalYDrop,
-              startY: state.startY,
-              endY, // used for "lowest fingertip wins"
-              fingerName: TAP_FINGERTIP_NAMES[fingerIndex] ||
-                          `LM${fingerIndex}`
-            });
-          }
-
-          // Reset state regardless of success
-          state.active    = false;
-          state.peakSpeed = 0;
-        }
+      if (tapEvent) {
+        potentialTapEvents.push(tapEvent);
       }
     }
   }
@@ -443,84 +407,95 @@ function checkForTap(timestampMs){
   return potentialTapEvents;
 }
 
-
 /**
- * Apply:
- *  - Per-hand “deepest fingertip wins” filtering
- *  - Finger suppression (e.g., ring > pinky) inside that deepest set
- *  - Then call onTap for remaining taps.
+ * Apply suppression (e.g., ring > pinky) and global debounce,
+ * then call onTap for final taps.
  */
  function processTapEvents(potentialTaps){
   if (!potentialTaps || potentialTaps.length === 0) return [];
 
-  // Group taps by hand so we can decide per-hand which finger actually "wins".
-  const tapsByHand = new Map();
-  for (const tap of potentialTaps) {
-    const handIndex = tap.handIndex ?? 0;
-    if (!tapsByHand.has(handIndex)) {
-      tapsByHand.set(handIndex, []);
-    }
-    tapsByHand.get(handIndex).push(tap);
+  // Global debounce: if too soon since last tap, drop all.
+  const nowAny = potentialTaps[0].timestamp;
+  if (nowAny - lastTapTime <= TAP_DEBOUNCE_DELAY) {
+    return [];
   }
+
+  // First, collapse by (handIndex, fingerIndex) so we only keep the
+  // latest candidate per finger in this frame batch.
+  const tapsByKey = potentialTaps.reduce((acc, tap) => {
+    const key = `${tap.handIndex}-${tap.fingerIndex}`;
+    acc[key] = tap;
+    return acc;
+  }, {});
+
+  // Apply finger suppression on each hand (e.g., Ring > Pinky).
+  for (const [dominantIndexStr, submissiveIndex] of Object.entries(FINGER_SUPPRESSION_HIERARCHY)) {
+    const dominantIndex = parseInt(dominantIndexStr, 10);
+
+    for (let handIndex = 0; handIndex < 2; handIndex++) {
+      const dominantKey   = `${handIndex}-${dominantIndex}`;
+      const submissiveKey = `${handIndex}-${submissiveIndex}`;
+
+      if (tapsByKey[dominantKey] && tapsByKey[submissiveKey]) {
+        delete tapsByKey[submissiveKey];
+      }
+    }
+  }
+
+  // NEW: per-hand "lowest finger wins" filter.
+  // Group surviving taps by handIndex, then keep only the tap whose
+  // finalY is largest (i.e., physically lowest on the image).
+  const tapsPerHand = {};
+  Object.values(tapsByKey).forEach(tap => {
+    const h = tap.handIndex ?? 0;
+    if (!tapsPerHand[h]) {
+      tapsPerHand[h] = [];
+    }
+    tapsPerHand[h].push(tap);
+  });
 
   const finalTaps = [];
-  const DEPTH_EPS = 0.002; // normalized-y tolerance for "same depth"
 
-  for (const [handIndex, taps] of tapsByHand.entries()) {
-    if (!taps || taps.length === 0) continue;
+  const metricForTap = (tap) => {
+    if (typeof tap.finalY === 'number') {
+      return tap.finalY;
+    }
+    // Fallback if finalY somehow missing: use startY + motionLength, or just motionLength
+    if (typeof tap.startY === 'number' && typeof tap.motionLength === 'number') {
+      return tap.startY + tap.motionLength;
+    }
+    return typeof tap.motionLength === 'number' ? tap.motionLength : -Infinity;
+  };
 
-    // Compute final y for each tap and track the deepest one
-    let maxEndY = -Infinity;
-    for (const tap of taps) {
-      const endY = (typeof tap.endY === 'number')
-        ? tap.endY
-        : (typeof tap.startY === 'number'
-            ? tap.startY + (tap.motionLength ?? 0)
-            : (tap.motionLength ?? 0));
-      tap._endY = endY;
-      if (endY > maxEndY) maxEndY = endY;
+  for (const handKey of Object.keys(tapsPerHand)) {
+    const taps = tapsPerHand[handKey];
+    if (!taps.length) continue;
+
+    if (taps.length === 1) {
+      finalTaps.push(taps[0]);
+      continue;
     }
 
-    // Keep only taps that end at (or extremely close to) the lowest point
-    let candidates = taps.filter(tap => (maxEndY - tap._endY) <= DEPTH_EPS);
+    let best = taps[0];
+    let bestMetric = metricForTap(best);
 
-    // If multiple deepest fingers remain on this hand, apply suppression
-    if (candidates.length > 1) {
-      const byFinger = {};
-      for (const tap of candidates) {
-        byFinger[tap.fingerIndex] = tap;
-      }
-
-      // e.g. ring (16) suppresses pinky (20)
-      for (const [dominantIndexStr, submissiveIndex] of Object.entries(FINGER_SUPPRESSION_HIERARCHY)) {
-        const dominantIndex = parseInt(dominantIndexStr, 10);
-        if (byFinger[dominantIndex] && byFinger[submissiveIndex]) {
-          delete byFinger[submissiveIndex];
-        }
-      }
-
-      candidates = Object.values(byFinger);
-
-      // If there's *still* a tie after suppression, just pick the deepest numerically
-      if (candidates.length > 1) {
-        candidates.sort((a, b) => b._endY - a._endY);
-        candidates = [candidates[0]];
+    for (let i = 1; i < taps.length; i++) {
+      const candidate = taps[i];
+      const m = metricForTap(candidate);
+      if (m > bestMetric) {
+        best = candidate;
+        bestMetric = m;
       }
     }
 
-    // Add this hand's winning tap(s) to final list
-    for (const tap of candidates) {
-      delete tap._endY;
-      finalTaps.push(tap);
-    }
+    finalTaps.push(best);
   }
 
-  // Call the callback for each final tap
+  // Call back into app.js for each final tap
   if (onTapCallback) {
     finalTaps.forEach(tap => onTapCallback(tap));
   }
 
-  // Update debounce time (any tap blocks new taps for a short time)
   if (finalTaps.length > 0) {
     lastTapTime = finalTaps[0].timestamp;
   }
