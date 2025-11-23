@@ -140,6 +140,9 @@ let highlightedKeyUntilMs = 0;
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
 
+// NEW: Latest refined fingertip contact points (M5/M2) for tap→key mapping
+let lastTipsForTap = [];
+
 // ---------- Typing log state ----------
 // (used by typeKeyLabel for both hover + tap typing)
 let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
@@ -377,12 +380,27 @@ function doTyping(tips, quad){
 }
 
 
-// Convert a tapEvent's fingertip to overlay pixel coordinates, using the
-// last detected landmarks from this frame.
+// Convert a tapEvent's fingertip to overlay pixel coordinates.
+// Prefer the refined M5/M2 contact point (what you actually see),
+// and fall back to the raw landmark if needed.
 function getTapOverlayPoint(tapEvent) {
-  if (!overlay || !lastHandsForTap || !lastHandsForTap.length) return null;
-  const { handIndex, fingerIndex } = tapEvent;
-  if (handIndex == null || fingerIndex == null) return null;
+  if (!overlay) return null;
+  const { handIndex, fingerIndex, fingerName } = tapEvent;
+  if (handIndex == null) return null;
+
+  // 1) Prefer refined fingertip contact point from refineFingertips
+  //    These are already in overlay pixel coordinates and respect MIRROR_PREVIEW.
+  if (lastTipsForTap && lastTipsForTap.length && fingerName) {
+    const tip = lastTipsForTap.find(
+      t => t.handIndex === handIndex && t.finger === fingerName
+    );
+    if (tip && Number.isFinite(tip.x) && Number.isFinite(tip.y)) {
+      return { x: tip.x, y: tip.y };
+    }
+  }
+
+  // 2) Fallback: raw MediaPipe fingertip landmark (old behavior)
+  if (!lastHandsForTap || !lastHandsForTap.length || fingerIndex == null) return null;
 
   const hand = lastHandsForTap[handIndex];
   if (!hand || hand.length <= fingerIndex) return null;
@@ -402,6 +420,7 @@ function getTapOverlayPoint(tapEvent) {
   const y = yNorm * overlay.height;
   return { x, y };
 }
+
 
 // Use existing keyboard mapping to find which key (if any) is under the tap
 function mapTapToKey(tapEvent) {
@@ -764,8 +783,17 @@ function mainLoop(){
   const result = detect();
   const nowMs  = performance.now();
 
-  // Save landmarks for tap→key mapping
+  // Save landmarks for tap→key mapping (fallback)
   lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
+
+  clearOverlay();
+  drawHands(result, W, H); // respects Show landmarks
+
+  // Refine fingertip contact points (what you *see* as circles)
+  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
+  lastTipsForTap = tips || [];           // NEW: remember refined tips for taps
+  drawFingertipMarkers(tips);
+  updateTipLog(result, tips);
 
   // Tap detection: ONLY when calibration is finished
   if (frozen && result && result.landmarks && result.landmarks.length) {
@@ -779,13 +807,6 @@ function mainLoop(){
 
     runTapDetectionFrame(nowMs);
   }
-
-  clearOverlay();
-  drawHands(result, W, H); // respects Show landmarks
-
-  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
-  drawFingertipMarkers(tips);
-  updateTipLog(result, tips);
 
   // During calibration: follow fingertips and maintain sliding 1s window of F/J
   if (!frozen && tips && tips.length){
