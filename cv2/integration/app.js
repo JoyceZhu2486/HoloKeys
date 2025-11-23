@@ -132,6 +132,11 @@ let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
 let lastW=0, lastH=0;
 let lastKey = null, lastKeyTime = 0;
 
+// Currently highlighted key (for tap feedback)
+let highlightedKeyLabel = null;
+let highlightedKeyUntilMs = 0;
+
+
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
 
@@ -221,6 +226,39 @@ function drawFingertipMarkers(tips){
   octx.restore();
 }
 
+// Highlight the key that was tapped (short flash)
+function drawTapKeyHighlight(q) {
+  if (!q || !highlightedKeyLabel) return;
+
+  const now = performance.now();
+  if (now > highlightedKeyUntilMs) {
+    // Highlight expired
+    highlightedKeyLabel = null;
+    return;
+  }
+
+  const cells = buildKeyCells(q);
+  const hit = cells.find(c => c.label === highlightedKeyLabel);
+  if (!hit) return;
+
+  octx.save();
+  octx.beginPath();
+  octx.moveTo(hit.poly[0].x, hit.poly[0].y);
+  for (let i = 1; i < hit.poly.length; i++) {
+    octx.lineTo(hit.poly[i].x, hit.poly[i].y);
+  }
+  octx.closePath();
+
+  // Semi-transparent fill + bright border
+  octx.fillStyle   = 'rgba(255, 230, 0, 0.25)';
+  octx.strokeStyle = 'rgba(255, 210, 0, 0.9)';
+  octx.lineWidth   = 3;
+  octx.fill();
+  octx.stroke();
+  octx.restore();
+}
+
+
 function updateTipLog(result, tips){
   if (!showTipLogChk) return;
 
@@ -273,6 +311,12 @@ function typeKeyLabel(label, source, meta) {
   if (label === lastKey && (now - lastKeyTime) < 120) return;
   lastKey = label;
   lastKeyTime = now;
+
+  // If this key came from a TAP event, flash the key on the overlay
+  if (source === 'tap') {
+    highlightedKeyLabel   = label;
+    highlightedKeyUntilMs = now + 180; // ms to show highlight
+  }
 
   // Logging
   const tRel = (typingSessionStartMs != null)
@@ -800,6 +844,7 @@ function mainLoop(){
   // Draw full keyboard & finger→key tooltips
   drawKeyboard(quad);
   drawKeycaps(quad);
+  drawTapKeyHighlight(quad);
   drawFingerKeyLabels(tips, quad);
 
   // F/J debug crosses
