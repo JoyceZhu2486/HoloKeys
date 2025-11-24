@@ -136,6 +136,9 @@ let lastKey = null, lastKeyTime = 0;
 let highlightedKeyLabel = null;
 let highlightedKeyUntilMs = 0;
 
+let highlightedFinger = null;
+let highlightedFingerUntilMs = 0;
+
 
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
@@ -261,6 +264,29 @@ function drawTapKeyHighlight(q) {
   octx.restore();
 }
 
+function drawTapFingerHighlight(tips) {
+  if (!highlightedFinger || performance.now() > highlightedFingerUntilMs) {
+    highlightedFinger = null;
+    return;
+  }
+  if (!tips || !tips.length) return;
+
+  const tip = tips.find(
+    t => t.handIndex === highlightedFinger.handIndex &&
+         t.finger === highlightedFinger.fingerName
+  );
+  if (!tip) return;
+
+  octx.save();
+  octx.beginPath();
+  octx.arc(tip.x, tip.y, 14, 0, Math.PI * 2);
+  octx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+  octx.lineWidth = 4;
+  octx.stroke();
+  octx.restore();
+}
+
+
 
 function updateTipLog(result, tips){
   if (!showTipLogChk) return;
@@ -319,6 +345,9 @@ function typeKeyLabel(label, source, meta) {
   if (source === 'tap') {
     highlightedKeyLabel   = label;
     highlightedKeyUntilMs = now + 180; // ms to show highlight
+
+    highlightedFinger = meta?.fingerTip; // you’ll pass this from tap.js
+    highlightedFingerUntilMs = now + 180;
   }
 
   // Logging
@@ -623,14 +652,23 @@ function recomputeFromAverages(){
       onTap: (tapEvent) => {
         // taps are only run after frozen in mainLoop
         flashTapBorder(tapEvent);
+    
+        // 🔹 Highlight the key
+        const { label, handIndex, fingerName } = tapEvent;
+        typeKeyLabel(label, 'tap', {
+          fingerTip: { handIndex, fingerName },
+        });
       },
+    
       onTapCandidate: (tapEvent) => {
         // log ALL candidate taps (including ones below score threshold)
         logTapCandidate(tapEvent);
       },
+    
       velocityThreshold: initialSpeed,
-      distanceThreshold: initialDistance
+      distanceThreshold: initialDistance,
     });
+    
 
     // Optional: make logs accessible from the browser console
     window.tapCandidateLog = tapCandidateLog;
@@ -793,6 +831,7 @@ function mainLoop(){
   const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
   lastTipsForTap = tips || [];           // NEW: remember refined tips for taps
   drawFingertipMarkers(tips);
+  drawTapFingerHighlight(lastTipsForTap);
   updateTipLog(result, tips);
 
   // Tap detection: ONLY when calibration is finished
