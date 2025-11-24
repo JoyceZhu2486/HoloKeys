@@ -23,9 +23,9 @@ const TAP_MAX_WINDOW_MS        = 350;     // max duration from start→dwell
 const STOP_VEL_THRESHOLD       = 0.0004;  // y-units/ms, considered stopped
 const DWELL_VEL_THRESHOLD      = 0.0003;  // allowed jitter while dwelling
 const DWELL_Y_RADIUS           = 0.004;   // max y deviation during dwell
-const DWELL_MIN_FRAMES         = 3;       // require this many dwell frames
-const DWELL_MIN_DURATION_MS    = 40;      // or this many ms of dwell
-const MIN_DECEL_METRIC         = 0.2;     // require some deceleration
+const DWELL_MIN_FRAMES         = 1;       // require this many dwell frames
+const DWELL_MIN_DURATION_MS    = 10;      // or this many ms of dwell
+const MIN_DECEL_METRIC         = 0.0002;     // require some deceleration
 
 // Score threshold: only taps with score ≥ this are accepted as "real taps"
 const DEFAULT_TAP_SCORE_THRESHOLD = 0.2;
