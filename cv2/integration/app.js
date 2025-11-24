@@ -132,8 +132,16 @@ let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
 let lastW=0, lastH=0;
 let lastKey = null, lastKeyTime = 0;
 
+// Currently highlighted key (for tap feedback)
+let highlightedKeyLabel = null;
+let highlightedKeyUntilMs = 0;
+
+
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
+
+// NEW: Latest refined fingertip contact points (M5/M2) for tap→key mapping
+let lastTipsForTap = [];
 
 // ---------- Typing log state ----------
 // (used by typeKeyLabel for both hover + tap typing)
@@ -221,6 +229,39 @@ function drawFingertipMarkers(tips){
   octx.restore();
 }
 
+// Highlight the key that was tapped (short flash)
+function drawTapKeyHighlight(q) {
+  if (!q || !highlightedKeyLabel) return;
+
+  const now = performance.now();
+  if (now > highlightedKeyUntilMs) {
+    // Highlight expired
+    highlightedKeyLabel = null;
+    return;
+  }
+
+  const cells = buildKeyCells(q);
+  const hit = cells.find(c => c.label === highlightedKeyLabel);
+  if (!hit) return;
+
+  octx.save();
+  octx.beginPath();
+  octx.moveTo(hit.poly[0].x, hit.poly[0].y);
+  for (let i = 1; i < hit.poly.length; i++) {
+    octx.lineTo(hit.poly[i].x, hit.poly[i].y);
+  }
+  octx.closePath();
+
+  // Semi-transparent fill + bright border
+  octx.fillStyle   = 'rgba(255, 230, 0, 0.25)';
+  octx.strokeStyle = 'rgba(255, 210, 0, 0.9)';
+  octx.lineWidth   = 3;
+  octx.fill();
+  octx.stroke();
+  octx.restore();
+}
+
+
 function updateTipLog(result, tips){
   if (!showTipLogChk) return;
 
@@ -273,6 +314,12 @@ function typeKeyLabel(label, source, meta) {
   if (label === lastKey && (now - lastKeyTime) < 120) return;
   lastKey = label;
   lastKeyTime = now;
+
+  // If this key came from a TAP event, flash the key on the overlay
+  if (source === 'tap') {
+    highlightedKeyLabel   = label;
+    highlightedKeyUntilMs = now + 180; // ms to show highlight
+  }
 
   // Logging
   const tRel = (typingSessionStartMs != null)
@@ -333,12 +380,27 @@ function doTyping(tips, quad){
 }
 
 
-// Convert a tapEvent's fingertip to overlay pixel coordinates, using the
-// last detected landmarks from this frame.
+// Convert a tapEvent's fingertip to overlay pixel coordinates.
+// Prefer the refined M5/M2 contact point (what you actually see),
+// and fall back to the raw landmark if needed.
 function getTapOverlayPoint(tapEvent) {
-  if (!overlay || !lastHandsForTap || !lastHandsForTap.length) return null;
-  const { handIndex, fingerIndex } = tapEvent;
-  if (handIndex == null || fingerIndex == null) return null;
+  if (!overlay) return null;
+  const { handIndex, fingerIndex, fingerName } = tapEvent;
+  if (handIndex == null) return null;
+
+  // 1) Prefer refined fingertip contact point from refineFingertips
+  //    These are already in overlay pixel coordinates and respect MIRROR_PREVIEW.
+  if (lastTipsForTap && lastTipsForTap.length && fingerName) {
+    const tip = lastTipsForTap.find(
+      t => t.handIndex === handIndex && t.finger === fingerName
+    );
+    if (tip && Number.isFinite(tip.x) && Number.isFinite(tip.y)) {
+      return { x: tip.x, y: tip.y };
+    }
+  }
+
+  // 2) Fallback: raw MediaPipe fingertip landmark (old behavior)
+  if (!lastHandsForTap || !lastHandsForTap.length || fingerIndex == null) return null;
 
   const hand = lastHandsForTap[handIndex];
   if (!hand || hand.length <= fingerIndex) return null;
@@ -358,6 +420,7 @@ function getTapOverlayPoint(tapEvent) {
   const y = yNorm * overlay.height;
   return { x, y };
 }
+
 
 // Use existing keyboard mapping to find which key (if any) is under the tap
 function mapTapToKey(tapEvent) {
@@ -720,8 +783,17 @@ function mainLoop(){
   const result = detect();
   const nowMs  = performance.now();
 
-  // Save landmarks for tap→key mapping
+  // Save landmarks for tap→key mapping (fallback)
   lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
+
+  clearOverlay();
+  drawHands(result, W, H); // respects Show landmarks
+
+  // Refine fingertip contact points (what you *see* as circles)
+  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
+  lastTipsForTap = tips || [];           // NEW: remember refined tips for taps
+  drawFingertipMarkers(tips);
+  updateTipLog(result, tips);
 
   // Tap detection: ONLY when calibration is finished
   if (frozen && result && result.landmarks && result.landmarks.length) {
@@ -735,13 +807,6 @@ function mainLoop(){
 
     runTapDetectionFrame(nowMs);
   }
-
-  clearOverlay();
-  drawHands(result, W, H); // respects Show landmarks
-
-  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
-  drawFingertipMarkers(tips);
-  updateTipLog(result, tips);
 
   // During calibration: follow fingertips and maintain sliding 1s window of F/J
   if (!frozen && tips && tips.length){
@@ -800,6 +865,7 @@ function mainLoop(){
   // Draw full keyboard & finger→key tooltips
   drawKeyboard(quad);
   drawKeycaps(quad);
+  drawTapKeyHighlight(quad);
   drawFingerKeyLabels(tips, quad);
 
   // F/J debug crosses
