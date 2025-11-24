@@ -15,15 +15,8 @@ const TAP_FINGERTIP_NAMES = {
   20: 'Pinky'
 };
 
-// If both fire at same time on the same hand, dominant suppresses submissive.
-const FINGER_SUPPRESSION_HIERARCHY = {
-  // ring (16) suppresses pinky (20)
-  16: 20
-};
-
 // History / timing constants
 const TAP_HISTORY_LENGTH       = 15;      // samples stored per fingertip
-const TAP_DEBOUNCE_DELAY       = 500;     // ms between taps (global)
 const TAP_MAX_WINDOW_MS        = 350;     // max duration from start→dwell
 
 // Dwell / “stop” thresholds (hard gates, not part of score)
@@ -35,7 +28,8 @@ const DWELL_MIN_DURATION_MS    = 40;      // or this many ms of dwell
 const MIN_DECEL_METRIC         = 0.2;     // require some deceleration
 
 // Score threshold: only taps with score ≥ this are accepted as "real taps"
-const TAP_SCORE_THRESHOLD      = 0.2;
+const DEFAULT_TAP_SCORE_THRESHOLD = 0.2;
+let tapScoreThreshold             = DEFAULT_TAP_SCORE_THRESHOLD;
 
 // Tunable thresholds (overridden by initTapDetection / setTapThresholds)
 // These connect to your UI controls in app.js.
@@ -54,9 +48,6 @@ let tapStates = {
   0: {},
   1: {}
 };
-
-// last successful tap time for global debounce
-let lastTapTime = 0;
 
 // Optional callbacks into app.js
 let onTapCallback = null;
@@ -95,8 +86,6 @@ function initTapState(){
       tapStates[handIndex][fingerIndex] = st;
     });
   }
-
-  lastTapTime = 0;
 }
 
 /**
@@ -324,8 +313,8 @@ function updateFingerStateForTap(
       //  - sufficient distance
       //  - clear stop & short dwell
       // Compute the tap score based ONLY on peakVelocity, avgVelocity, totalDistance.
-      const totalDistance = state.maxDistance;
-      const avgVelocity   = totalDistance / totalDurationMs;
+      const totalDistance   = state.maxDistance;
+      const avgVelocity     = totalDistance / totalDurationMs;
 
       const score = computeTapScore(
         state.peakVelocity,
@@ -333,18 +322,28 @@ function updateFingerStateForTap(
         totalDistance
       );
 
-      // Build candidate event with score and dwell info
       const candidate = {
+        id: `${handIndex}-${fingerIndex}-${currT.toFixed(1)}`,
         handIndex,
         fingerIndex,
+        fingerName: TAP_FINGERTIP_NAMES[fingerIndex] || `LM${fingerIndex}`,
+
+        // timing
         timestamp: currT,
-        speed: state.peakVelocity,
-        motionLength: totalDistance,
+        totalDurationMs,
         dwellFrames: state.dwellFrames,
         dwellDurationMs: dwellElapsed,
-        score,
-        fingerName: TAP_FINGERTIP_NAMES[fingerIndex] ||
-                    `LM${fingerIndex}`
+
+        // motion
+        startY: state.startY,
+        endY: currY,
+        motionLength: totalDistance,
+        speed: state.peakVelocity,
+        avgVelocity,
+        decelMetric,
+
+        // classifier
+        score
       };
 
       // Report ALL candidates to debug callback (for logging/tuning)
@@ -353,7 +352,7 @@ function updateFingerStateForTap(
       }
 
       // Only treat as a real tap if the score passes threshold
-      if (score >= TAP_SCORE_THRESHOLD) {
+      if (score >= tapScoreThreshold) {
         resetFingerState(state);
         return candidate;
       }
@@ -406,50 +405,34 @@ function checkForTap(){
 }
 
 /**
- * Apply suppression (e.g., ring > pinky) and global debounce,
- * then call onTap for final taps.
+ * NO debounce, NO suppression:
+ * Every tap that passes the FSM + score threshold is emitted as-is.
  */
 function processTapEvents(potentialTaps){
   if (!potentialTaps || potentialTaps.length === 0) return [];
 
-  // Global debounce: if too soon since last tap, drop all.
-  const nowAny = potentialTaps[0].timestamp;
-  if (nowAny - lastTapTime <= TAP_DEBOUNCE_DELAY) {
-    return [];
-  }
+  // Pick at most ONE tap per hand per frame: the one with the highest score.
+  const bestByHand = {};
 
-  const tapsByKey = potentialTaps.reduce((acc, tap) => {
-    const key = `${tap.handIndex}-${tap.fingerIndex}`;
-    acc[key] = tap;
-    return acc;
-  }, {});
+  for (const tap of potentialTaps) {
+    const h = tap.handIndex;
+    if (h == null) continue;
+    const prev = bestByHand[h];
 
-  // Apply finger suppression on each hand
-  for (const [dominantIndexStr, submissiveIndex] of Object.entries(FINGER_SUPPRESSION_HIERARCHY)) {
-    const dominantIndex = parseInt(dominantIndexStr, 10);
-
-    for (let handIndex = 0; handIndex < 2; handIndex++) {
-      const dominantKey   = `${handIndex}-${dominantIndex}`;
-      const submissiveKey = `${handIndex}-${submissiveIndex}`;
-
-      if (tapsByKey[dominantKey] && tapsByKey[submissiveKey]) {
-        delete tapsByKey[submissiveKey];
-      }
+    if (!prev || tap.score > prev.score) {
+      bestByHand[h] = tap;
     }
   }
 
-  const finalTaps = Object.values(tapsByKey);
+  const finalTaps = Object.values(bestByHand);
 
   if (onTapCallback) {
     finalTaps.forEach(tap => onTapCallback(tap));
   }
 
-  if (finalTaps.length > 0) {
-    lastTapTime = finalTaps[0].timestamp;
-  }
-
   return finalTaps;
 }
+
 
 // ---------- Public API ----------
 
@@ -457,9 +440,10 @@ function processTapEvents(potentialTaps){
  * Initialize tap detection.
  * options: {
  *   onTap?: (tapEvent) => void,
- *   onTapCandidate?: (tapEvent) => void,   // NEW: all candidate taps w/ score
+ *   onTapCandidate?: (tapEvent) => void,
  *   velocityThreshold?: number,
- *   distanceThreshold?: number
+ *   distanceThreshold?: number,
+ *   scoreThreshold?: number
  * }
  */
 export function initTapDetection(options = {}){
@@ -467,7 +451,8 @@ export function initTapDetection(options = {}){
     onTap,
     onTapCandidate,
     velocityThreshold,
-    distanceThreshold
+    distanceThreshold,
+    scoreThreshold
   } = options;
 
   onTapCallback = (typeof onTap === 'function') ? onTap : null;
@@ -480,6 +465,9 @@ export function initTapDetection(options = {}){
   if (typeof distanceThreshold === 'number') {
     minTapDistance = distanceThreshold;
   }
+  if (typeof scoreThreshold === 'number') {
+    tapScoreThreshold = scoreThreshold;
+  }
 
   initTapState();
 }
@@ -487,12 +475,15 @@ export function initTapDetection(options = {}){
 /**
  * Dynamically update thresholds from UI controls.
  */
-export function setTapThresholds({ velocityThreshold, distanceThreshold } = {}){
+export function setTapThresholds({ velocityThreshold, distanceThreshold, scoreThreshold } = {}){
   if (typeof velocityThreshold === 'number') {
     tapVelocityThreshold = velocityThreshold;
   }
   if (typeof distanceThreshold === 'number') {
     minTapDistance = distanceThreshold;
+  }
+  if (typeof scoreThreshold === 'number') {
+    tapScoreThreshold = scoreThreshold;
   }
 }
 

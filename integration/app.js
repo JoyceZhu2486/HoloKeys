@@ -19,40 +19,42 @@ import {
 
 // ---------- UI refs ----------
 
-const statusEl      = document.getElementById('status');
-const btnStartRear  = document.getElementById('btnStartRear');
+const statusEl = document.getElementById('status');
+const btnStartRear = document.getElementById('btnStartRear');
 const btnStartFront = document.getElementById('btnStartFront');
-const btnStop       = document.getElementById('btnStop');
-const btnSnap       = document.getElementById('btnSnap');
-const chkBlack      = document.getElementById('chkBlack');
+const btnStop = document.getElementById('btnStop');
+const btnSnap = document.getElementById('btnSnap');
+const chkBlack = document.getElementById('chkBlack');
 
-const showHandsChk  = document.getElementById('showHands');
-const showDebugChk  = document.getElementById('showDebug');
+const showHandsChk = document.getElementById('showHands');
+const showDebugChk = document.getElementById('showDebug');
 const showTipLogChk = document.getElementById('showTipLog');
-const tipLogPanel   = document.getElementById('tipLogPanel');
-const contactLogEl  = document.getElementById('contactLog');
-const btnRecal      = document.getElementById('btnRecal');
+const showTapLogChk = document.getElementById('showTapLog');
+const tipLogPanel = document.getElementById('tipLogPanel');
+const contactLogEl = document.getElementById('contactLog');
+const btnRecal = document.getElementById('btnRecal');
 const tapTypingModeChk = document.getElementById('tapTypingMode');
 
-const video   = document.getElementById('video');
+const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
-const octx    = overlay.getContext('2d');
+const octx = overlay.getContext('2d');
 
-const stageWrap     = document.getElementById('stageWrap');
-const tapLogPanel   = document.getElementById('tapLogPanel');
-const tapList       = document.getElementById('tapList');
+const stageWrap = document.getElementById('stageWrap');
+const tapLogPanel = document.getElementById('tapLogPanel');
+const tapList = document.getElementById('tapList');
 
-const heightSlider      = document.getElementById('height');
-const ratioSlider       = document.getElementById('ratio');
-const heightDefaultBtn  = document.getElementById('heightDefault');
-const ratioDefaultBtn   = document.getElementById('ratioDefault');
+const heightSlider = document.getElementById('height');
+const ratioSlider = document.getElementById('ratio');
+const heightDefaultBtn = document.getElementById('heightDefault');
+const ratioDefaultBtn = document.getElementById('ratioDefault');
 
-const editor        = document.getElementById('editor');
+const editor = document.getElementById('editor');
 const focusEditorBtn = document.getElementById('focusEditorBtn');
 const clearEditorBtn = document.getElementById('clearEditorBtn');
 
-const inputSpeedThreshold    = document.getElementById('inputSpeedThreshold');
+const inputSpeedThreshold = document.getElementById('inputSpeedThreshold');
 const inputDistanceThreshold = document.getElementById('inputDistanceThreshold');
+const inputScoreThreshold = document.getElementById('inputScoreThreshold');
 
 // ---------- Constants ----------
 
@@ -70,18 +72,19 @@ const TIP_COLOR_GRADIENT = '#3b82f6'; // M5 success
 const TIP_COLOR_FALLBACK = '#dc2626'; // M5 -> M2 fallback
 
 // Storage keys for tap thresholds
-const SPEED_STORAGE_KEY    = 'tapVelocityThreshold';
+const SPEED_STORAGE_KEY = 'tapVelocityThreshold';
 const DISTANCE_STORAGE_KEY = 'tapMinTapDistance';
+const SCORE_STORAGE_KEY = 'tapScoreThreshold';
 
 // ---------- Editor helpers ----------
 
-function focusEditor(){ editor?.focus(); }
+function focusEditor() { editor?.focus(); }
 
-function setValueAndCaret(text, caretPos){
+function setValueAndCaret(text, caretPos) {
   if (!editor) return;
   const wasFocused = document.activeElement === editor;
   editor.value = text;
-  editor.dispatchEvent(new Event('input', {bubbles:true}));
+  editor.dispatchEvent(new Event('input', { bubbles: true }));
   if (!wasFocused) editor.blur();
   else editor.setSelectionRange(caretPos, caretPos);
 }
@@ -129,7 +132,7 @@ let frozenJ = null;          // averaged J from last 1s at freeze time
 let quad = null;      // {LB,RB,TR,TL}
 let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
 
-let lastW=0, lastH=0;
+let lastW = 0, lastH = 0;
 let lastKey = null, lastKeyTime = 0;
 
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
@@ -150,7 +153,7 @@ let tapCandidateLog = [];  // array of { timeAbsMs, score, speed, motionLength, 
 
 // ---------- Drawing helpers ----------
 
-function drawHands(result, W, H){
+function drawHands(result, W, H) {
   if (!showHandsChk?.checked) return;
   const hands = result?.landmarks;
   if (!hands?.length) return;
@@ -171,12 +174,12 @@ function drawHands(result, W, H){
     octx.beginPath();
     for (const [startIdx, endIdx] of HAND_CONNECTIONS) {
       const start = hand[startIdx];
-      const end   = hand[endIdx];
+      const end = hand[endIdx];
       if (!start || !end) continue;
       const startX = start.x * w;
       const startY = start.y * h;
-      const endX   = end.x * w;
-      const endY   = end.y * h;
+      const endX = end.x * w;
+      const endY = end.y * h;
       octx.moveTo(startX, startY);
       octx.lineTo(endX, endY);
     }
@@ -196,7 +199,7 @@ function drawHands(result, W, H){
   octx.restore();
 }
 
-function drawFingertipMarkers(tips){
+function drawFingertipMarkers(tips) {
   if (!showHandsChk?.checked) return;
   if (!tips || !tips.length) return;
 
@@ -225,7 +228,7 @@ function drawFingertipMarkers(tips){
   octx.restore();
 }
 
-function updateTipLog(result, tips){
+function updateTipLog(result, tips) {
   if (!showTipLogChk) return;
 
   if (!showTipLogChk.checked) {
@@ -247,7 +250,7 @@ function updateTipLog(result, tips){
   let html = '';
   for (let hi = 0; hi < hands.length; hi++) {
     const handLabel = (handedness[hi]?.[0]?.categoryName) || 'Unknown'; // Left / Right
-    html += `<div class="log-hand-label">Hand ${hi+1} (${handLabel})</div>`;
+    html += `<div class="log-hand-label">Hand ${hi + 1} (${handLabel})</div>`;
 
     const handTips = tips.filter(t => t.handIndex === hi);
     if (!handTips.length) {
@@ -274,7 +277,7 @@ function typeKeyLabel(label, source, meta) {
   const now = performance.now();
 
   // Shared debounce for both hover + tap so we don't double-type
-  if (label === lastKey && (now - lastKeyTime) < 120) return;
+  // if (label === lastKey && (now - lastKeyTime) < 120) return;
   lastKey = label;
   lastKeyTime = now;
 
@@ -283,10 +286,10 @@ function typeKeyLabel(label, source, meta) {
     ? (now - typingSessionStartMs)
     : now;
 
-  const x         = meta?.x ?? null;
-  const y         = meta?.y ?? null;
+  const x = meta?.x ?? null;
+  const y = meta?.y ?? null;
   const handIndex = meta?.handIndex ?? null;
-  const finger    = meta?.finger ?? null;
+  const finger = meta?.finger ?? null;
 
   typingLog.push({
     timeMs: tRel,
@@ -316,13 +319,13 @@ function typeKeyLabel(label, source, meta) {
   }
 }
 
-function doTyping(tips, quad){
+function doTyping(tips, quad) {
   if (!quad) return;
   const cells = buildKeyCells(quad);
   const idx = tips.find(t => t.finger === 'Index');
   if (!idx) return;
 
-  const hit = findKeyAtPoint(cells, {x: idx.x, y: idx.y});
+  const hit = findKeyAtPoint(cells, { x: idx.x, y: idx.y });
   if (!hit) { lastKey = null; return; }
 
   const label = hit.label;
@@ -335,7 +338,6 @@ function doTyping(tips, quad){
     finger: idx.finger || null
   });
 }
-
 
 // Convert a tapEvent's fingertip to overlay pixel coordinates, using the
 // last detected landmarks from this frame.
@@ -415,28 +417,43 @@ function logTapCandidate(tapEvent) {
   const mapped = mapTapToKey(tapEvent);  // may be null if outside keyboard
 
   const entry = {
-    timeAbsMs: tapEvent.timestamp,
-    score: tapEvent.score,
-    speed: tapEvent.speed,
-    motionLength: tapEvent.motionLength,
-    dwellFrames: tapEvent.dwellFrames,
-    dwellDurationMs: tapEvent.dwellDurationMs,
+    // raw event info from tap.js
+    id: tapEvent.id || null,
     handIndex: tapEvent.handIndex,
     fingerIndex: tapEvent.fingerIndex,
-    fingerName: tapEvent.fingerName,
+    fingerName: tapEvent.fingerName || null,
+
+    timestamp: tapEvent.timestamp,
+    totalDurationMs: tapEvent.totalDurationMs,
+    dwellFrames: tapEvent.dwellFrames,
+    dwellDurationMs: tapEvent.dwellDurationMs,
+
+    startY: tapEvent.startY,
+    endY: tapEvent.endY,
+    motionLength: tapEvent.motionLength,
+    speed: tapEvent.speed,
+    avgVelocity: tapEvent.avgVelocity,
+    decelMetric: tapEvent.decelMetric,
+
+    score: tapEvent.score,
+
+    // mapping info
     x: pt ? pt.x : null,
     y: pt ? pt.y : null,
-    keyLabel: mapped ? mapped.label : null
+    keyLabel: mapped ? mapped.label : null,
+
+    // label to be filled in later by you
+    // "real" | "glitch" | "move" | whatever scheme you like
+    label: null
   };
 
   tapCandidateLog.push(entry);
-  // For quick inspection while tuning:
   console.log('[Tap candidate]', entry);
 }
 
 // ---------- Tap UI helpers ----------
 
-function flashTapBorder(tapEvent){
+function flashTapBorder(tapEvent) {
   if (!stageWrap) return;
 
   // Visual feedback: red border flash
@@ -473,23 +490,37 @@ function flashTapBorder(tapEvent){
   }
 }
 
+function updateTapLogVisibility() {
+  if (!tapLogPanel) return;
+  if (showTapLogChk && !showTapLogChk.checked) {
+    tapLogPanel.style.display = 'none';
+  } else {
+    // Only show if we actually have something or user explicitly wants it
+    tapLogPanel.style.display = 'block';
+  }
+}
 
-async function addTapRecord(tapEvent){
+async function addTapRecord(tapEvent) {
   if (!tapList) return;
 
   try {
-    if (tapLogPanel) tapLogPanel.style.display = 'block';
+    if (tapLogPanel) {
+      // Only force showing if the user hasn’t turned it off
+      if (!showTapLogChk || showTapLogChk.checked) {
+        tapLogPanel.style.display = 'block';
+      }
+    }
 
     const blob = await cam.captureJpeg({ quality: 0.75 });
     if (!blob) return;
 
     const url = URL.createObjectURL(blob);
 
-    const handLabel   = `Hand ${tapEvent.handIndex + 1}`;
+    const handLabel = `Hand ${tapEvent.handIndex + 1}`;
     const fingerLabel = tapEvent.fingerName || `LM${tapEvent.fingerIndex}`;
     const speedPerSec = tapEvent.speed * 1000; // y-units per second
-    const dist        = tapEvent.motionLength;
-    const tMs         = tapEvent.timestamp.toFixed(1);
+    const dist = tapEvent.motionLength;
+    const tMs = tapEvent.timestamp.toFixed(1);
 
     const card = document.createElement('div');
     card.className = 'tap-record';
@@ -504,7 +535,7 @@ async function addTapRecord(tapEvent){
     `;
 
     if (!tapList.firstElementChild ||
-        !tapList.firstElementChild.classList.contains('tap-record')) {
+      !tapList.firstElementChild.classList.contains('tap-record')) {
       tapList.innerHTML = '';
     }
 
@@ -521,7 +552,7 @@ async function addTapRecord(tapEvent){
 
 // ---------- Calibration helpers ----------
 
-function startCalibration(){
+function startCalibration() {
   frozen = false;
   calibStartMs = 0;
 
@@ -536,7 +567,7 @@ function startCalibration(){
 }
 
 
-function recomputeFromAverages(){
+function recomputeFromAverages() {
   // Use the averaged F/J from the last ~1s of calibration.
   // At freeze time we store them in frozenF/frozenJ; if those are not
   // available (e.g., during live calibration while sliders change), fall
@@ -567,15 +598,16 @@ function recomputeFromAverages(){
 
 // ---------- Main setup ----------
 
-(async function main(){
+(async function main() {
   statusEl.textContent = 'Loading model…';
   try {
     await initHands();
     await cam.listCameras();
 
     // Tap thresholds + localStorage
-    let initialSpeed    = 0.00015;
+    let initialSpeed = 0.00015;
     let initialDistance = 0.010;
+    let initialScore = 0.20;
 
     const storedSpeed = localStorage.getItem(SPEED_STORAGE_KEY);
     if (storedSpeed !== null) {
@@ -589,18 +621,29 @@ function recomputeFromAverages(){
       if (!Number.isNaN(v) && v > 0) initialDistance = v;
     }
 
+    const storedScore = localStorage.getItem(SCORE_STORAGE_KEY);
+    if (storedScore !== null) {
+      const v = parseFloat(storedScore);
+      if (!Number.isNaN(v) && v >= 0 && v <= 1) initialScore = v;
+    }
+
     initTapDetection({
       onTap: (tapEvent) => {
         // taps are only run after frozen in mainLoop
         flashTapBorder(tapEvent);
+        // (Optional) if you *only* want final taps to create cards,
+        // you could move addTapRecord here instead of onTapCandidate.
       },
       onTapCandidate: (tapEvent) => {
         // log ALL candidate taps (including ones below score threshold)
         logTapCandidate(tapEvent);
+        // NEW: capture frame + show a card in the Tap Events panel
+        addTapRecord(tapEvent);
       },
       velocityThreshold: initialSpeed,
-      distanceThreshold: initialDistance
-    });
+      distanceThreshold: initialDistance,
+      scoreThreshold: initialScore
+    });    
 
     // Optional: make logs accessible from the browser console
     window.tapCandidateLog = tapCandidateLog;
@@ -612,11 +655,14 @@ function recomputeFromAverages(){
     if (inputDistanceThreshold) {
       inputDistanceThreshold.value = String(initialDistance);
     }
+    if (inputScoreThreshold) {
+      inputScoreThreshold.value = String(initialScore.toFixed(6));
+    }
 
     statusEl.textContent = 'Ready. Start camera.';
 
     // Start / stop camera
-    if (btnStartRear)  btnStartRear.onclick  = () => start(cam.startRear);
+    if (btnStartRear) btnStartRear.onclick = () => start(cam.startRear);
     if (btnStartFront) btnStartFront.onclick = () => start(cam.startFront);
     if (cam.camSel) {
       cam.camSel.onchange = () => start(cam.selectDevice, cam.camSel.value);
@@ -646,7 +692,7 @@ function recomputeFromAverages(){
 
     // Geometry sliders
     if (heightSlider) setHeightScale(heightSlider.value);
-    if (ratioSlider)  setTopShrink(ratioSlider.value);
+    if (ratioSlider) setTopShrink(ratioSlider.value);
 
     if (heightSlider) {
       heightSlider.addEventListener('input', e => {
@@ -696,6 +742,31 @@ function recomputeFromAverages(){
         localStorage.setItem(DISTANCE_STORAGE_KEY, String(v));
       });
     }
+    if (inputScoreThreshold) {
+      inputScoreThreshold.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (Number.isNaN(v) || v < 0 || v > 1) return;
+        setTapThresholds({ scoreThreshold: v });
+        localStorage.setItem(SCORE_STORAGE_KEY, String(v));
+      });
+    }
+
+    if (btnExportTapLog) {
+      btnExportTapLog.onclick = () => {
+        const dataStr = JSON.stringify(tapCandidateLog, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `tap_candidates_${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+    }
+
 
     // Editor helpers
     if (focusEditorBtn) focusEditorBtn.onclick = () => editor?.focus();
@@ -708,10 +779,10 @@ function recomputeFromAverages(){
 
 // ---------- Camera start/stop ----------
 
-async function start(startFn, ...args){
-  if (btnStartRear)  btnStartRear.disabled  = true;
+async function start(startFn, ...args) {
+  if (btnStartRear) btnStartRear.disabled = true;
   if (btnStartFront) btnStartFront.disabled = true;
-  if (btnStop)       btnStop.disabled       = true;
+  if (btnStop) btnStop.disabled = true;
   statusEl.textContent = 'Starting camera…';
   try {
     await startFn(...args);
@@ -727,12 +798,12 @@ async function start(startFn, ...args){
     console.error(e);
     statusEl.textContent = `Error starting camera: ${e.message}`;
   } finally {
-    if (btnStartRear)  btnStartRear.disabled  = false;
+    if (btnStartRear) btnStartRear.disabled = false;
     if (btnStartFront) btnStartFront.disabled = false;
   }
 }
 
-function stop(){
+function stop() {
   cam.stopStream();
   clearOverlay();
   statusEl.textContent = 'Stopped.';
@@ -741,24 +812,24 @@ function stop(){
 
 // ---------- Main loop ----------
 
-function mainLoop(){
+function mainLoop() {
   const W = video.videoWidth, H = video.videoHeight;
   if (!W || !H) return;
 
-  if (W!==lastW || H!==lastH){
-    lastW=W; lastH=H;
-    resizeOverlayToVideo(W,H);
+  if (W !== lastW || H !== lastH) {
+    lastW = W; lastH = H;
+    resizeOverlayToVideo(W, H);
   }
 
   const result = detect();
-  const nowMs  = performance.now();
+  const nowMs = performance.now();
 
   // Save landmarks for tap→key mapping
   lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
 
   // Tap detection: ONLY when calibration is finished
   if (frozen && result && result.landmarks && result.landmarks.length) {
-    const hands    = result.landmarks;
+    const hands = result.landmarks;
     const numHands = Math.min(hands.length, 2);
 
     for (let handIndex = 0; handIndex < numHands; handIndex++) {
@@ -778,15 +849,19 @@ function mainLoop(){
   drawFingertipMarkers(tips);
   updateTipLog(result, tips);
 
+  if (showTapLogChk) {
+    showTapLogChk.addEventListener('change', updateTapLogVisibility);
+    updateTapLogVisibility();
+  }
 
   // During calibration: follow fingertips and maintain sliding 1s window of F/J
-  if (!frozen && tips && tips.length){
-    const idx = tips.filter(t => t.finger === 'Index').sort((a,b)=>a.x-b.x);
-    if (idx.length >= 2){
-      const F = idx[0], J = idx[idx.length-1];
-      lastFJ = { F:{x:F.x,y:F.y}, J:{x:J.x,y:J.y} };
+  if (!frozen && tips && tips.length) {
+    const idx = tips.filter(t => t.finger === 'Index').sort((a, b) => a.x - b.x);
+    if (idx.length >= 2) {
+      const F = idx[0], J = idx[idx.length - 1];
+      lastFJ = { F: { x: F.x, y: F.y }, J: { x: J.x, y: J.y } };
 
-      quad = computeQuadFromFJ({x:F.x,y:F.y},{x:J.x,y:J.y});
+      quad = computeQuadFromFJ({ x: F.x, y: F.y }, { x: J.x, y: J.y });
 
       // start timer on first valid quad
       const now = performance.now();
@@ -797,7 +872,7 @@ function mainLoop(){
       const cutoff = now - 1000;
       fjSamples = fjSamples.filter(s => s.t >= cutoff);
 
-      const elapsed = (now - calibStartMs)/1000;
+      const elapsed = (now - calibStartMs) / 1000;
       if (elapsed >= 10) {
         frozen = true;
 
@@ -840,7 +915,7 @@ function mainLoop(){
 
   // F/J debug crosses
   if (showDebugChk?.checked) {
-    const drawX = (pt, r=6) => {
+    const drawX = (pt, r = 6) => {
       octx.beginPath();
       octx.moveTo(pt.x - r, pt.y - r); octx.lineTo(pt.x + r, pt.y + r);
       octx.moveTo(pt.x + r, pt.y - r); octx.lineTo(pt.x - r, pt.y + r);
