@@ -40,8 +40,11 @@ const overlay = document.getElementById('overlay');
 const octx = overlay.getContext('2d');
 
 const stageWrap = document.getElementById('stageWrap');
-const tapLogPanel = document.getElementById('tapLogPanel');
 const tapList = document.getElementById('tapList');
+
+// We will use this as the single "Save all logs" button.
+const btnExportTapLog = document.getElementById('btnExportTapLog');
+// btnExportMotionLog exists in HTML but is unused now (one-button export).
 
 const heightSlider = document.getElementById('height');
 const ratioSlider = document.getElementById('ratio');
@@ -145,15 +148,19 @@ let lastHandsForTap = [];
 // Latest refined fingertip positions (overlay coordinates) for tap mapping
 let lastTipsForTap = [];
 
+// ---------- Typing & tap logs ----------
 
-// ---------- Typing log state ----------
-// (used by typeKeyLabel for both hover + tap typing)
-let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
+let typingLog = [];              // { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
 let typingSessionStartMs = null; // set when calibration finishes
 
 // Tap candidate log (for threshold tuning)
-let tapCandidateLog = [];  // array of { timeAbsMs, score, speed, motionLength, handIndex, fingerIndex, fingerName, x, y, keyLabel }
+let tapCandidateLog = [];  // { ... from logTapCandidate }
 
+// Fingertip motion log for index finger (per-frame samples, for plotting)
+let fingertipMotionLog = [];   // { t, handIndex, x_raw, y_raw, x_refined, y_refined, tapCandidate }
+
+// FSM phase-change events from tap.js
+let tapPhaseEvents = [];       // { handIndex, fingerIndex, fromPhase, toPhase, timestamp }
 
 // ---------- Drawing helpers ----------
 
@@ -381,8 +388,7 @@ function doTyping(tips, quad){
   });
 }
 
-// Convert a tapEvent's fingertip to overlay pixel coordinates, using the
-// last detected landmarks from this frame.
+// Convert a tapEvent's fingertip to overlay pixel coordinates
 function getTapOverlayPoint(tapEvent) {
   if (!overlay) return null;
   const { handIndex, fingerIndex, fingerName } = tapEvent;
@@ -394,14 +400,13 @@ function getTapOverlayPoint(tapEvent) {
 
     let tip = null;
     if (targetName) {
-      // Match by handIndex + finger name ("Index", "Middle", etc.)
       tip = lastTipsForTap.find(t =>
         t.handIndex === handIndex &&
         (t.finger === targetName || t.fingerName === targetName)
       );
     }
 
-    // If name match failed, try matching by handIndex + landmark index, if present
+    // If name match failed, try matching by handIndex + landmark index
     if (!tip) {
       tip = lastTipsForTap.find(t =>
         t.handIndex === handIndex &&
@@ -450,7 +455,7 @@ function mapTapToKey(tapEvent) {
   return {
     label: hit.label,
     point: pt
-  };
+  }; 
 }
 
 function logTapCandidate(tapEvent) {
@@ -478,19 +483,50 @@ function logTapCandidate(tapEvent) {
     decelMetric: tapEvent.decelMetric,
 
     score: tapEvent.score,
+    passedScoreThreshold: !!tapEvent.passedScoreThreshold,
+    scoreThreshold: tapEvent.scoreThreshold ?? null,
 
     // mapping info
     x: pt ? pt.x : null,
     y: pt ? pt.y : null,
     keyLabel: mapped ? mapped.label : null,
 
-    // label to be filled in later by you
-    // "real" | "glitch" | "move" | whatever scheme you like
+    // label to be filled later (e.g., "real", "glitch", etc.)
     label: null
   };
 
   tapCandidateLog.push(entry);
   console.log('[Tap candidate]', entry);
+}
+
+// Per-frame fingertip motion logging for index fingertips
+function logIndexMotionForPlot(result, tips, nowMs) {
+  if (!result || !result.landmarks || !result.landmarks.length || !tips || !tips.length) {
+    return;
+  }
+
+  for (let handIndex = 0; handIndex < result.landmarks.length; handIndex++) {
+    const handLms = result.landmarks[handIndex];
+    if (!handLms[8]) continue;   // LM 8 is index fingertip
+
+    const lm = handLms[8];
+    const refined = tips.find(t => t.handIndex === handIndex && t.finger === "Index");
+
+    // Optional: attach the last tap candidate (for convenience when plotting)
+    const lastCand = tapCandidateLog.length
+      ? tapCandidateLog[tapCandidateLog.length - 1]
+      : null;
+
+    fingertipMotionLog.push({
+      t: nowMs,
+      handIndex,
+      x_raw: lm.x,
+      y_raw: lm.y,
+      x_refined: refined?.x ?? null,
+      y_refined: refined?.y ?? null,
+      tapCandidate: lastCand
+    });
+  }
 }
 
 // ---------- Tap UI helpers ----------
@@ -533,12 +569,16 @@ function flashTapBorder(tapEvent){
 }
 
 function updateTapLogVisibility() {
-  if (!tapLogPanel) return;
+  // tapLogPanel may or may not exist in HTML; guard it.
+  if (!tapList) return;
   if (showTapLogChk && !showTapLogChk.checked) {
-    tapLogPanel.style.display = 'none';
+    if (tapList.parentElement) {
+      tapList.parentElement.style.display = 'none';
+    }
   } else {
-    // Only show if we actually have something or user explicitly wants it
-    tapLogPanel.style.display = 'block';
+    if (tapList.parentElement) {
+      tapList.parentElement.style.display = 'block';
+    }
   }
 }
 
@@ -546,10 +586,9 @@ async function addTapRecord(tapEvent) {
   if (!tapList) return;
 
   try {
-    if (tapLogPanel) {
-      // Only force showing if the user hasn’t turned it off
+    if (tapList.parentElement) {
       if (!showTapLogChk || showTapLogChk.checked) {
-        tapLogPanel.style.display = 'block';
+        tapList.parentElement.style.display = 'block';
       }
     }
 
@@ -592,6 +631,14 @@ async function addTapRecord(tapEvent) {
   }
 }
 
+// ---------- FSM phase logging ----------
+
+function handleTapPhaseChange(ev) {
+  // You can filter to index only if you want:
+  // if (ev.fingerIndex !== 8) return;
+  tapPhaseEvents.push(ev);
+}
+
 // ---------- Calibration helpers ----------
 
 function startCalibration() {
@@ -608,12 +655,8 @@ function startCalibration() {
   statusEl.textContent = 'Calibrating… (place index fingertips on F and J)';
 }
 
-
 function recomputeFromAverages() {
   // Use the averaged F/J from the last ~1s of calibration.
-  // At freeze time we store them in frozenF/frozenJ; if those are not
-  // available (e.g., during live calibration while sliders change), fall
-  // back to the current sliding window or lastFJ.
   let F = frozenF;
   let J = frozenJ;
 
@@ -673,23 +716,23 @@ function recomputeFromAverages() {
       onTap: (tapEvent) => {
         // taps are only run after frozen in mainLoop
         flashTapBorder(tapEvent);
-        // (Optional) if you *only* want final taps to create cards,
-        // you could move addTapRecord here instead of onTapCandidate.
       },
       onTapCandidate: (tapEvent) => {
         // log ALL candidate taps (including ones below score threshold)
         logTapCandidate(tapEvent);
-        // NEW: capture frame + show a card in the Tap Events panel
+        // show card in the Tap Events panel
         addTapRecord(tapEvent);
       },
+      onPhaseChange: handleTapPhaseChange,
       velocityThreshold: initialSpeed,
       distanceThreshold: initialDistance,
       scoreThreshold: initialScore
-    });    
+    });
 
-    // Optional: make logs accessible from the browser console
+    // Make logs accessible from the browser console
     window.tapCandidateLog = tapCandidateLog;
-
+    window.fingertipMotionLog = fingertipMotionLog;
+    window.tapPhaseEvents = tapPhaseEvents;
 
     if (inputSpeedThreshold) {
       inputSpeedThreshold.value = String(initialSpeed);
@@ -784,6 +827,7 @@ function recomputeFromAverages() {
         localStorage.setItem(DISTANCE_STORAGE_KEY, String(v));
       });
     }
+
     if (inputScoreThreshold) {
       inputScoreThreshold.addEventListener('input', (e) => {
         const v = parseFloat(e.target.value);
@@ -793,15 +837,69 @@ function recomputeFromAverages() {
       });
     }
 
+    // ONE BUTTON to export all logs: tap candidates, motion, FSM states
     if (btnExportTapLog) {
       btnExportTapLog.onclick = () => {
-        const dataStr = JSON.stringify(tapCandidateLog, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
+
+        // 1) Tap candidates as JSON
+        const tapJson = JSON.stringify(tapCandidateLog, null, 2);
+        const tapBlob = new Blob([tapJson], { type: 'application/json' });
+        let url = URL.createObjectURL(tapBlob);
+        let a = document.createElement('a');
+        a.href = url;
         a.download = `tap_candidates_${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // 2) Fingertip motion as CSV
+        if (fingertipMotionLog.length) {
+          const headers = [
+            "t","handIndex",
+            "x_raw","y_raw",
+            "x_refined","y_refined",
+            "tapScore","tapSpeed","tapDist","tapLabel"
+          ];
+
+          const rows = fingertipMotionLog.map(s => {
+            const cand = s.tapCandidate;
+            return [
+              s.t,
+              s.handIndex,
+              s.x_raw,
+              s.y_raw,
+              s.x_refined,
+              s.y_refined,
+              cand?.score ?? "",
+              cand?.speed ?? "",
+              cand?.motionLength ?? "",
+              cand?.label ?? ""
+            ].join(",");
+          });
+
+          const csv = [headers.join(","), ...rows].join("\n");
+          const csvBlob = new Blob([csv], { type: "text/csv" });
+          url = URL.createObjectURL(csvBlob);
+          a = document.createElement("a");
+          a.href = url;
+          a.download = `fingertip_motion_${ts}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } else {
+          alert("No motion log data recorded yet.");
+        }
+
+        // 3) FSM phase events as JSON
+        const phaseJson = JSON.stringify(tapPhaseEvents, null, 2);
+        const phaseBlob = new Blob([phaseJson], { type: 'application/json' });
+        url = URL.createObjectURL(phaseBlob);
+        a = document.createElement('a');
+        a.href = url;
+        a.download = `tap_fsm_states_${ts}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -809,6 +907,11 @@ function recomputeFromAverages() {
       };
     }
 
+    // Tap log visibility toggle
+    if (showTapLogChk) {
+      showTapLogChk.addEventListener('change', updateTapLogVisibility);
+      updateTapLogVisibility();
+    }
 
     // Editor helpers
     if (focusEditorBtn) focusEditorBtn.onclick = () => editor?.focus();
@@ -886,15 +989,13 @@ function mainLoop() {
   drawHands(result, W, H); // respects Show landmarks
 
   const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
-  lastTipsForTap = tips;  // <--- NEW: keep for tap mapping
+  lastTipsForTap = tips;
+
+  // Per-frame motion logging for Index fingertips (for plotting)
+  logIndexMotionForPlot(result, tips, nowMs);
 
   drawFingertipMarkers(tips);
   updateTipLog(result, tips);
-
-  if (showTapLogChk) {
-    showTapLogChk.addEventListener('change', updateTapLogVisibility);
-    updateTapLogVisibility();
-  }
 
   // During calibration: follow fingertips and maintain sliding 1s window of F/J
   if (!frozen && tips && tips.length) {
@@ -929,7 +1030,6 @@ function mainLoop() {
           frozenF = { x: sumFx / n, y: sumFy / n };
           frozenJ = { x: sumJx / n, y: sumJy / n };
         } else if (lastFJ) {
-          // Fallback: if for some reason we have no window, use last frame
           frozenF = { x: lastFJ.F.x, y: lastFJ.F.y };
           frozenJ = { x: lastFJ.J.x, y: lastFJ.J.y };
         } else {
@@ -953,8 +1053,8 @@ function mainLoop() {
   // Draw full keyboard & finger→key tooltips
   drawKeyboard(quad);
   drawKeycaps(quad);
-  drawTapKeyHighlight(quad);   // <-- add this line
-  drawFingerKeyLabels(tips, quad); 
+  drawTapKeyHighlight(quad);
+  drawFingerKeyLabels(tips, quad);
 
   // F/J debug crosses
   if (showDebugChk?.checked) {

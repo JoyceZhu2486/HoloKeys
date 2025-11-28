@@ -1,0 +1,58 @@
+[
+  {
+    "handIndex": 1,
+    "fingerIndex": 4,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 127779.69999992847
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 132032.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 12,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 132150.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 133123.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 134235
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 4,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 135143.69999992847
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 135262.69999992847
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 20,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 148682.19999992847
+  }
+]

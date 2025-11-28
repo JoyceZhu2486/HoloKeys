@@ -192,13 +192,12 @@
 
     <!-- Tap event log -->
     <section class="log-panel" id="tapLogPanel" style="display:none;">
-      <strong>Tap Events</strong>
-      <div class="tap-list" id="tapList">
-        <div style="padding: 4px 8px; color:#666; font-size:0.8rem;">
-          Tap events will appear here after calibration.
-        </div>
-      </div>
-      <button id="btnExportTapLog">Download tap log (JSON)</button>
+      <h3>Tap Events</h3>
+      <p class="hint">
+        This log shows every tap candidate with its score and mapping.
+      </p>
+      <div id="tapList" class="tap-list"></div>
+      <button id="btnExportTapLog">Save logs (taps + motion + FSM)</button>
     </section>
 
     <!-- Typed text -->
