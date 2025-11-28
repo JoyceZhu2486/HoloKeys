@@ -1,0 +1,121 @@
+[
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 30621.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 34097.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 35246.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 36451.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 37602
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 38754.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 39906.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 41183.699999928474
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 42782.299999952316
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 44006
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 45176.299999952316
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 46339.10000002384
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 47447.299999952316
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 49437.699999928474
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 50381.699999928474
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 51378.699999928474
+  },
+  {
+    "handIndex": 1,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 52324.5
+  }
+]
