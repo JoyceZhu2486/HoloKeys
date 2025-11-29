@@ -162,6 +162,15 @@ let fingertipMotionLog = [];   // { t, handIndex, x_raw, y_raw, x_refined, y_ref
 // FSM phase-change events from tap.js
 let tapPhaseEvents = [];       // { handIndex, fingerIndex, fromPhase, toPhase, timestamp }
 
+// NEW: tap → text latency log (per character typed by tap)
+let tapLatencyLog = [];
+// each entry:
+// {
+//   label, handIndex, fingerIndex, fingerName,
+//   tapTimestamp, tapDetectedAt, typeCallStartedAt, typedAt,
+//   latencyFromDetectionMs, latencyFromTapTimestampMs
+// }
+
 // ---------- Drawing helpers ----------
 
 function drawHands(result, W, H) {
@@ -544,6 +553,8 @@ function flashTapBorder(tapEvent){
   const mapped = mapTapToKey(tapEvent);
 
   if (mapped) {
+    const detectionNow = performance.now();
+
     console.log('[Tap detected → key]', {
       handIndex: tapEvent.handIndex,
       fingerIndex: tapEvent.fingerIndex,
@@ -556,11 +567,29 @@ function flashTapBorder(tapEvent){
 
     // If tap typing mode is on, actually type the key
     if (tapTypingModeChk && tapTypingModeChk.checked) {
+      const typeStart = performance.now();
       typeKeyLabel(mapped.label, 'tap', {
         x: mapped.point.x,
         y: mapped.point.y,
         handIndex: tapEvent.handIndex,
         finger: tapEvent.fingerName || null
+      });
+      const typeEnd = performance.now();
+
+      // Log latency for this tap → text path
+      tapLatencyLog.push({
+        label: mapped.label,
+        handIndex: tapEvent.handIndex,
+        fingerIndex: tapEvent.fingerIndex,
+        fingerName: tapEvent.fingerName || null,
+
+        tapTimestamp: tapEvent.timestamp,         // timestamp from tap.js (ms)
+        tapDetectedAt: detectionNow,             // when we mapped tap to a key
+        typeCallStartedAt: typeStart,            // before modifying editor
+        typedAt: typeEnd,                        // after editor update function returns
+
+        latencyFromDetectionMs: typeEnd - detectionNow,
+        latencyFromTapTimestampMs: typeEnd - tapEvent.timestamp
       });
     }
   } else {
@@ -733,6 +762,8 @@ function recomputeFromAverages() {
     window.tapCandidateLog = tapCandidateLog;
     window.fingertipMotionLog = fingertipMotionLog;
     window.tapPhaseEvents = tapPhaseEvents;
+    window.typingLog = typingLog;
+    window.tapLatencyLog = tapLatencyLog;
 
     if (inputSpeedThreshold) {
       inputSpeedThreshold.value = String(initialSpeed);
@@ -837,16 +868,45 @@ function recomputeFromAverages() {
       });
     }
 
-    // ONE BUTTON to export all logs: tap candidates, motion, FSM states
+    // ONE BUTTON to export all logs: tap candidates, motion, FSM states, typing, latency
     if (btnExportTapLog) {
       btnExportTapLog.onclick = () => {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        let url, a;
+
+        // 0) Typing log as CSV (for reference / debugging)
+        if (typingLog.length) {
+          const headers = [
+            "timeMs","timeAbsMs","label","source",
+            "x","y","handIndex","finger"
+          ];
+          const rows = typingLog.map(e => [
+            e.timeMs,
+            e.timeAbsMs,
+            JSON.stringify(e.label),
+            e.source,
+            e.x ?? "",
+            e.y ?? "",
+            e.handIndex ?? "",
+            e.finger ?? ""
+          ].join(","));
+          const csv = [headers.join(","), ...rows].join("\n");
+          const csvBlob = new Blob([csv], { type: "text/csv" });
+          url = URL.createObjectURL(csvBlob);
+          a = document.createElement("a");
+          a.href = url;
+          a.download = `typing_log_${ts}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
 
         // 1) Tap candidates as JSON
         const tapJson = JSON.stringify(tapCandidateLog, null, 2);
         const tapBlob = new Blob([tapJson], { type: 'application/json' });
-        let url = URL.createObjectURL(tapBlob);
-        let a = document.createElement('a');
+        url = URL.createObjectURL(tapBlob);
+        a = document.createElement('a');
         a.href = url;
         a.download = `tap_candidates_${ts}.json`;
         document.body.appendChild(a);
@@ -904,6 +964,38 @@ function recomputeFromAverages() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        // 4) Tap latency as CSV (main latency test artifact)
+        if (tapLatencyLog.length) {
+          const headers = [
+            "label",
+            "handIndex","fingerIndex","fingerName",
+            "tapTimestamp","tapDetectedAt","typeCallStartedAt","typedAt",
+            "latencyFromDetectionMs","latencyFromTapTimestampMs"
+          ];
+          const rows = tapLatencyLog.map(e => [
+            JSON.stringify(e.label),
+            e.handIndex ?? "",
+            e.fingerIndex ?? "",
+            JSON.stringify(e.fingerName ?? ""),
+            e.tapTimestamp,
+            e.tapDetectedAt,
+            e.typeCallStartedAt,
+            e.typedAt,
+            e.latencyFromDetectionMs,
+            e.latencyFromTapTimestampMs
+          ].join(","));
+          const csv = [headers.join(","), ...rows].join("\n");
+          const csvBlob = new Blob([csv], { type: "text/csv" });
+          url = URL.createObjectURL(csvBlob);
+          a = document.createElement("a");
+          a.href = url;
+          a.download = `tap_latency_${ts}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
       };
     }
 
