@@ -27,71 +27,74 @@ const TAP_FINGERTIP_NAMES = {
   20: "Pinky",
 };
 
-// History length and timing
-const TAP_HISTORY_LENGTH = 15;       // samples per fingertip
-const TAP_MAX_WINDOW_MS  = 600;      // max time from tap-descent start to dwell
+// Which finger(s) we care about for keyboard tap detection
+const ENABLED_FINGERS = {
+  8: true, // Index
+  // you could also enable thumb / other fingers if you want:
+  // 4: true,
+  // 12: true,
+};
 
-// --- Lift (pre-tap) heuristics ---
-// LIFT is easy to enter, just to avoid starting taps halfway down.
-const LIFT_ENTER_DIST_BASE = 0.008;  // baselineY - currY > this ⇒ possible lift
-const LIFT_ENTER_VEL_BASE  = 0.00008;// upward (negative) velocity threshold
-const LIFT_TIMEOUT_MS      = 800;    // stay in LIFT at most this long
+// Default thresholds (user can override via setTapThresholds)
+let tapVelocityThreshold = 0.00015; // "tap start speed" slider
+let minTapDistance = 0.010;         // "min tap distance" slider
+let tapScoreThreshold = 0.20;       // "tap score threshold" slider
 
-// --- Tap descent & dwell ---
-// Base values before we tie them to sliders
-const TAP_DOWN_DIST_MIN_BASE = 0.010;   // y-units from tapStartY
+// Derived thresholds (updated whenever sliders change)
+let downEnterVel = 0.00020;
+let tapDownDistMin = 0.007;
+let minDistHard = 0.006;
+let minDurHard = 30;
+let upExitVel = 0.0004;
+let velMinHard = 0.0002;
+
+const MIN_DIST_FACTOR = 0.6; // scales minDistHard from minTapDistance
+const MIN_DUR_HARD_BASE = 40;
+
+// Dwell parameters
 const DWELL_Y_RADIUS         = 0.004;   // allowed y deviation during dwell
-const DWELL_VEL_THRESHOLD    = 0.00030; // |v| below this counts as "almost still"
-const DWELL_MIN_FRAMES       = 2;       // consecutive stable frames
-const DWELL_MIN_DURATION_MS  = 15;      // minimal dwell time
-const DWELL_MAX_DURATION_MS  = 250;     // after this, force evaluation
+const DWELL_VEL_THRESHOLD    = 0.00008; // "stillness" around bottom
+const DWELL_MIN_FRAMES       = 2;
+const DWELL_MIN_DURATION_MS  = 50;
+const DWELL_MAX_DURATION_MS  = 220;
 
-// If we see a clear upward motion in dwell, exit to LIFT to prep next tap.
-const UP_EXIT_VEL_BASE       = 0.00040; // upward velocity magnitude (negative)
+// Global time window for a tap (lift + descent + dwell)
+const TAP_MAX_WINDOW_MS      = 320;
 
-// --- Soft / mild hard gates for tap candidates ---
-// Very gentle; we rely mostly on the confidence score.
-// We will ALSO use a **velocity** hard gate derived from the user's setting.
-const MIN_DIST_FACTOR        = 0.6;     // minDistHard = MIN_DIST_FACTOR * minTapDistance
-const MAX_DIST_HARD          = 0.45;    // above this likely a reach / big move
-const MIN_DUR_HARD_BASE      = 35;      // ms, extremely fast "tap" below this is suspicious
-const MAX_DUR_HARD           = 650;     // ms, above this is probably not a single tap
+// Upward velocity to skip directly back into lift
+const UP_EXIT_VEL_BASE       = 0.00040;
 
-// --- Score threshold ---
-// User can override via slider.
-const DEFAULT_TAP_SCORE_THRESHOLD = 0.5;
-let tapScoreThreshold = DEFAULT_TAP_SCORE_THRESHOLD;
+// Hard limits for distance/duration
+const MAX_DIST_HARD          = 0.04;   // extremely large downward motion → reject
+const MAX_DUR_HARD           = 280;    // extremely long "tap" → reject
 
-// --- Tunable thresholds controlled by UI ---
-// These get set via initTapDetection / setTapThresholds.
-let tapVelocityThreshold = 0.00015;    // "fast downward" reference from slider
-let minTapDistance       = 0.010;      // "typical tap distance" from slider
+// Motion sampling
+const HISTORY_WINDOW_MS      = 260;    // only last N ms of samples used for velocity
+const MIN_HISTORY_SAMPLES    = 2;      // need at least 2 samples for velocity
 
-// --- Derived thresholds that depend on the above ---
-let downEnterVel   = 0.00025; // actual velocity used to enter tap-descent
-let tapDownDistMin = TAP_DOWN_DIST_MIN_BASE;
-let minDistHard    = MIN_DIST_FACTOR * minTapDistance;
-let minDurHard     = MIN_DUR_HARD_BASE;
-let upExitVel      = UP_EXIT_VEL_BASE;
-let velMinHard     = 0.00012; // minimal peak downward speed for a real tap
+// Used to avoid double taps from same finger in a tiny time window
+const PER_FINGER_COOLDOWN_MS = 90;
 
-// Recompute derived thresholds whenever user changes sliders.
+///////////////////////////
+///////////////////////////
+
+// We dynamically compute these from user sliders in updateDerivedThresholds().
 function updateDerivedThresholds() {
   // How easy it is to start tap descent:
   // slightly above user's "tap start speed" slider, but never absurdly high.
   downEnterVel = Math.max(
     tapVelocityThreshold * 1.8,
     tapVelocityThreshold * 0.8,
-    0.00003
+    0.000015
   );
 
   // Minimum downward distance before going into dwell:
   // allow taps slightly smaller than minTapDistance.
-  tapDownDistMin = Math.max(0.004, minTapDistance * 0.8);
+  tapDownDistMin = Math.max(0.002, minTapDistance * 0.8);
 
   // Mild "hard" minimum distance for a tap:
   // pick something that kills 0.004–0.005 I-taps but keeps 0.007–0.01 J-taps.
-  minDistHard = Math.max(0.006, minTapDistance * MIN_DIST_FACTOR);
+  minDistHard = Math.max(0.003, minTapDistance * MIN_DIST_FACTOR);
 
   // Mild minimum duration: scale a bit with minTapDistance (smaller motion may be quicker).
   minDurHard = Math.max(MIN_DUR_HARD_BASE * (minTapDistance / 0.01), 25);
@@ -101,7 +104,7 @@ function updateDerivedThresholds() {
 
   // Velocity hard gate: real taps have peak speeds an order of magnitude
   // above jitter. Require at least ~8× slider or a small absolute floor.
-  velMinHard = Math.max(tapVelocityThreshold * 8.0, 0.00012);
+  velMinHard = Math.max(tapVelocityThreshold * 8.0, 0.00006);
 }
 
 //////////////////////////
@@ -117,8 +120,7 @@ let tapStates = { 0: {}, 1: {} };
 // Optional callbacks into app.js
 let onTapCallback = null;
 let onTapCandidateCallback = null;
-let onPhaseChangeCallback = null;  // NEW: FSM state change callback
-
+let onPhaseChangeCallback = null;  // FSM state change callback
 
 //////////////////////
 // Helper functions //
@@ -142,7 +144,7 @@ function resetFingerState(state) {
   state.liftDurationMs = 0;
   state.downFramesInLift = 0;
 
-  // Tap-descent
+  // Tap descent
   state.tapStartY = 0;
   state.tapStartTime = 0;
   state.tapMaxDownDist = 0;
@@ -153,149 +155,185 @@ function resetFingerState(state) {
   state.dwellStartTime = 0;
   state.dwellFramesStable = 0;
 
-  state.lastVelocitySigned = 0;
+  // Baseline
+  state.baselineY = baselineY != null ? baselineY : null;
+}
 
-  if (baselineY != null) {
-    state.baselineY = baselineY;
-  } else if (typeof state.baselineY === "undefined") {
-    state.baselineY = null;
+function ensureFingerState(handIndex, lmIndex) {
+  if (!tapStates[handIndex]) {
+    tapStates[handIndex] = {};
   }
-}
-
-function initTapState() {
-  tapHistory = { 0: {}, 1: {} };
-  tapStates = { 0: {}, 1: {} };
-
-  for (let h = 0; h < 2; h++) {
-    TAP_FINGERTIP_INDICES.forEach((f) => {
-      tapHistory[h][f] = [];
-      const st = {};
-      st.baselineY = null;
-      resetFingerState(st);
-      tapStates[h][f] = st;
-    });
+  if (!tapStates[handIndex][lmIndex]) {
+    tapStates[handIndex][lmIndex] = {
+      phase: "idle",
+      baselineY: null,
+      liftStartY: 0,
+      liftStartTime: 0,
+      liftMaxY: 0,
+      liftDistance: 0,
+      liftDurationMs: 0,
+      downFramesInLift: 0,
+      tapStartY: 0,
+      tapStartTime: 0,
+      tapMaxDownDist: 0,
+      tapPeakDownVel: 0,
+      dwellStartY: 0,
+      dwellStartTime: 0,
+      dwellFramesStable: 0,
+    };
   }
+  return tapStates[handIndex][lmIndex];
 }
 
-function recordHandMotion(landmarks, handIndex, timestampMs) {
-  if (!landmarks || handIndex == null) return;
-  const histories = tapHistory[handIndex];
-  if (!histories) return;
-
-  TAP_FINGERTIP_INDICES.forEach((idx) => {
-    if (landmarks.length > idx) {
-      const tip = landmarks[idx];
-      let hist = histories[idx];
-      if (!hist) {
-        hist = [];
-        histories[idx] = hist;
-      }
-      hist.push({ y: tip.y, time: timestampMs });
-      if (hist.length > TAP_HISTORY_LENGTH) hist.shift();
-    }
-  });
+function ensureHistory(handIndex, lmIndex) {
+  if (!tapHistory[handIndex]) {
+    tapHistory[handIndex] = {};
+  }
+  if (!tapHistory[handIndex][lmIndex]) {
+    tapHistory[handIndex][lmIndex] = [];
+  }
+  return tapHistory[handIndex][lmIndex];
 }
 
+// Per-finger cooldown tracking
+let lastTapTime = {
+  0: {}, // per handIndex
+  1: {},
+};
+
+function canFireTap(handIndex, fingerIndex, t) {
+  const now = t;
+  const prev = lastTapTime[handIndex][fingerIndex] ?? -Infinity;
+  if (now - prev < PER_FINGER_COOLDOWN_MS) {
+    return false;
+  }
+  lastTapTime[handIndex][fingerIndex] = now;
+  return true;
+}
+
+// Finite difference velocity: positive = downward
 function computeSignedVelocity(history) {
-  if (!history || history.length < 2) return 0;
   const n = history.length;
-  const curr = history[n - 1];
-  const prev = history[n - 2];
-  const dt = curr.time - prev.time;
+  if (n < 2) return 0;
+
+  const latest = history[n - 1];
+  let oldest = history[0];
+
+  for (let i = n - 2; i >= 0; i--) {
+    const cand = history[i];
+    if (latest.time - cand.time > HISTORY_WINDOW_MS) break;
+    oldest = cand;
+  }
+
+  const dt = latest.time - oldest.time;
   if (dt <= 0) return 0;
-  const dy = curr.y - prev.y;
-  return dy / dt; // downward positive
+
+  const dy = latest.y - oldest.y;
+  return dy / dt;
 }
 
 //////////////////////////
 // Confidence scoring   //
 //////////////////////////
 
-// Taps are recognized mostly from downward + dwell behavior,
-// with lift giving a smaller boost.
-function computeTapConfidence({
-  liftDistance,
-  liftDurationMs,
-  tapMaxDownDist,
-  tapPeakDownVel,
-  tapDurationMs,
-  dwellFramesStable,
-  dwellDurationMs,
-}) {
+function computeTapConfidence(params) {
+  const {
+    liftDistance,
+    liftDurationMs,
+    tapMaxDownDist,
+    tapPeakDownVel,
+    tapDurationMs,
+    dwellFramesStable,
+    dwellDurationMs,
+  } = params;
+
+  const minD = minTapDistance;
+  const sliderV = tapVelocityThreshold;
+
+  let score = 0;
+  let weightSum = 0;
+
+  const addTerm = (value, weight) => {
+    score += value * weight;
+    weightSum += weight;
+  };
+
   // --- Lift (small weight) ---
-  const liftTargetDist = Math.max(0.5 * minTapDistance, 0.006);
+  const liftTargetDist = Math.max(0.5 * minTapDistance, 0.003);
   const liftDistNorm = clamp(
-    (liftDistance - liftTargetDist / 2) / (liftTargetDist || 1e-6),
+    (liftDistance - liftTargetDist / 2) /
+      (liftTargetDist - liftTargetDist / 2 + 1e-6),
     0,
     1
   );
-  const liftTargetTime = 60;
-  const liftTimeNorm = clamp(
-    (liftDurationMs - liftTargetTime / 2) / (liftTargetTime || 1e-6),
+
+  const liftDurTarget = 65;
+  const liftDurNorm = clamp(
+    1 - Math.abs(liftDurationMs - liftDurTarget) / (liftDurTarget + 40),
     0,
     1
   );
-  const liftScore = 0.6 * liftDistNorm + 0.4 * liftTimeNorm;
+
+  addTerm(0.4 * liftDistNorm + 0.6 * liftDurNorm, 0.15);
 
   // --- Downward leg (main) ---
   // Distance term: 0 until we pass a distFloor (~0.006–0.007), then up to 1.
-  const distFloor = Math.max(minTapDistance * 0.6, 0.006);
-  const distCeil  = Math.max(minTapDistance * 4.0, distFloor + 0.02);
-  const tapDistNorm = clamp(
-    (tapMaxDownDist - distFloor) / (distCeil - distFloor || 1e-6),
+  const distFloor = Math.max(minTapDistance * 0.6, 0.003);
+  const distCeil = Math.max(minTapDistance * 4.0, distFloor + 0.02);
+
+  const distNorm = clamp(
+    (tapMaxDownDist - distFloor) / (distCeil - distFloor + 1e-6),
     0,
     1
   );
 
-  // Velocity term: 0 until we pass velMinHard, then up to 1 by ~4×.
-  const velFloor = velMinHard;
-  const velCeil  = Math.max(velFloor * 4.0, velFloor + 0.0003);
-  const tapVelNorm = clamp(
-    (tapPeakDownVel - velFloor) / (velCeil - velFloor || 1e-6),
+  const velFloor = sliderV * 4.0;
+  const velCeil = sliderV * 18.0;
+  const velNorm = clamp(
+    (tapPeakDownVel - velFloor) / (velCeil - velFloor + 1e-6),
     0,
     1
   );
 
-  let tapDurNorm = 0;
-  if (tapDurationMs <= 0) tapDurNorm = 0;
-  else if (tapDurationMs < 80) tapDurNorm = 0.5;      // snappy tap
-  else if (tapDurationMs <= 350) tapDurNorm = 1;      // nice range
-  else if (tapDurationMs <= MAX_DUR_HARD) tapDurNorm = 0.6;
-  else tapDurNorm = 0.3;
+  const durTarget = 120;
+  const durNorm = clamp(
+    1 - Math.abs(tapDurationMs - durTarget) / (durTarget + 80),
+    0,
+    1
+  );
 
-  const tapScore =
-    0.45 * tapDistNorm +
-    0.40 * tapVelNorm +
-    0.15 * tapDurNorm;
+  addTerm(0.6 * distNorm + 0.5 * velNorm + 0.3 * durNorm, 0.55);
 
-  // --- Dwell (contact) ---
+  // --- Dwell (medium weight) ---
+  const dwellFramesTarget = 3;
   const dwellFramesNorm = clamp(
-    (dwellFramesStable - DWELL_MIN_FRAMES) / 4,
+    dwellFramesStable / dwellFramesTarget,
+    0,
+    1.2
+  );
+
+  const dwellTarget = 120;
+  const dwellNorm = clamp(
+    1 - Math.abs(dwellDurationMs - dwellTarget) / (dwellTarget + 80),
     0,
     1
   );
 
-  let dwellTimeNorm = 0;
-  if (dwellDurationMs <= 0) dwellTimeNorm = 0;
-  else if (dwellDurationMs < DWELL_MIN_DURATION_MS) dwellTimeNorm = 0;
-  else if (dwellDurationMs <= 150) dwellTimeNorm = 1;
-  else if (dwellDurationMs <= 300) dwellTimeNorm = 0.7;
-  else dwellTimeNorm = 0.4;
+  addTerm(0.5 * dwellFramesNorm + 0.5 * dwellNorm, 0.30);
 
-  const dwellScore = 0.5 * dwellFramesNorm + 0.5 * dwellTimeNorm;
+  if (weightSum <= 0) return 0;
+  let finalScore = score / weightSum;
 
-  // Weights: downward + dwell dominate, lift is assistive.
-  const wL = 0.2;
-  const wT = 0.5;
-  const wD = 0.3;
+  const distPenalty =
+    tapMaxDownDist > MAX_DIST_HARD ? 0.2 : tapMaxDownDist > minD * 3.0 ? 0.9 : 1.0;
+  finalScore *= distPenalty;
 
-  const confidence = wL * liftScore + wT * tapScore + wD * dwellScore;
-  return clamp(confidence, 0, 1);
+  return clamp(finalScore, 0, 1);
 }
 
-//////////////////////////
-// FSM per fingertip    //
-//////////////////////////
+/////////////////////////////
+// Core FSM update per tip //
+/////////////////////////////
 
 function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
   if (!history || history.length < 2) return null;
@@ -306,32 +344,29 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
   const currT = curr.time;
 
   const prevPhase = state.phase || "idle";
-  let tapEvent = null; // we will fill this only when a confirmed tap happens
+  let tapEvent = null;
 
   const vSigned = computeSignedVelocity(history);
   const vDown = vSigned > 0 ? vSigned : 0;
   const vUp = vSigned < 0 ? -vSigned : 0;
 
-  // Initialize baseline if needed
   if (state.baselineY == null || Number.isNaN(state.baselineY)) {
     state.baselineY = currY;
   }
 
-  // Slowly update baseline when idle and nearly still
   const absVel = Math.abs(vSigned);
   if (state.phase === "idle" && absVel < 0.0001) {
     state.baselineY = state.baselineY * 0.9 + currY * 0.1;
   }
 
   const baselineY = state.baselineY;
-  const liftFromBaseline = baselineY - currY; // positive = lifted up
+  const liftFromBaseline = baselineY - currY;
 
   switch (state.phase) {
     case "idle": {
-      // Easy entry into LIFT: small upward movement or being above baseline
       if (
-        liftFromBaseline > LIFT_ENTER_DIST_BASE ||
-        vUp > LIFT_ENTER_VEL_BASE
+        liftFromBaseline > 0.002 ||
+        vUp > tapVelocityThreshold * 0.6
       ) {
         state.phase = "lift";
         state.liftStartY = currY;
@@ -345,25 +380,21 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
     }
 
     case "lift": {
-      // Track how far & how long we've lifted
       if (currY < state.liftMaxY) state.liftMaxY = currY;
       state.liftDistance = baselineY - state.liftMaxY;
       state.liftDurationMs = currT - state.liftStartTime;
 
-      // Timeout if staying in LIFT too long
-      if (state.liftDurationMs > LIFT_TIMEOUT_MS) {
+      if (state.liftDurationMs > 220) {
         resetFingerState(state);
         break;
       }
 
-      // Count downward frames while in LIFT
       if (vDown > downEnterVel) {
         state.downFramesInLift += 1;
       } else {
         state.downFramesInLift = 0;
       }
 
-      // Once we see sustained downward motion, enter tap-descent.
       if (state.downFramesInLift >= 2) {
         state.phase = "tapDescent";
         state.tapStartY = currY;
@@ -375,19 +406,17 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
     }
 
     case "tapDescent": {
-      const downDist = currY - state.tapStartY; // downward positive
+      const downDist = currY - state.tapStartY;
       const elapsedMs = currT - state.tapStartTime;
 
       if (downDist > state.tapMaxDownDist) state.tapMaxDownDist = downDist;
       if (vDown > state.tapPeakDownVel) state.tapPeakDownVel = vDown;
 
-      // Abort if we move strongly back up or take far too long
       if (downDist < -0.006 || elapsedMs > TAP_MAX_WINDOW_MS) {
         resetFingerState(state);
         break;
       }
 
-      // Once we've moved enough downward and slowed, enter dwell
       if (
         state.tapMaxDownDist > tapDownDistMin &&
         vDown < DWELL_VEL_THRESHOLD
@@ -408,7 +437,6 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
 
       if (isStill) state.dwellFramesStable += 1;
 
-      // If we wander far away from dwell center, cancel
       if (!isStill && dy > DWELL_Y_RADIUS * 2) {
         resetFingerState(state);
         break;
@@ -429,12 +457,15 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
         const avgVelocity =
           totalDuration > 0 ? totalDistance / totalDuration : 0;
 
+        const distanceOk = totalDistance >= minDistHard;
+        const durationOk =
+          tapDurationMs >= minDurHard && tapDurationMs <= MAX_DUR_HARD;
+        const speedOk = state.tapPeakDownVel >= velMinHard;
+
         const passesHardGates =
-          totalDistance >= minDistHard &&
-          totalDistance <= MAX_DIST_HARD &&
-          tapDurationMs >= minDurHard &&
-          tapDurationMs <= MAX_DUR_HARD &&
-          state.tapPeakDownVel >= velMinHard;
+          distanceOk &&
+          durationOk &&
+          totalDistance <= MAX_DIST_HARD;
 
         const confidence = computeTapConfidence({
           liftDistance: state.liftDistance,
@@ -446,7 +477,8 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
           dwellDurationMs: dwellDurationMs,
         });
 
-        const passedScore = confidence >= tapScoreThreshold && passesHardGates;
+        const scoreOk = confidence >= tapScoreThreshold;
+        const passedScore = scoreOk && passesHardGates;
 
         const candidate = {
           id: `${handIndex}-${fingerIndex}-${currT.toFixed(1)}`,
@@ -466,6 +498,19 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
           score: confidence,
           passedScoreThreshold: passedScore,
           scoreThreshold: tapScoreThreshold,
+          distanceOk,
+          durationOk,
+          speedOk,
+          hardGatesPassed: passesHardGates,
+          scoreOk,
+          rejectReasons: !passedScore
+            ? [
+                !distanceOk && "distance",
+                !speedOk && "speed",
+                !durationOk && "duration",
+                (distanceOk && speedOk && durationOk && !scoreOk) && "score",
+              ].filter(Boolean)
+            : [],
         };
 
         if (onTapCandidateCallback) {
@@ -476,9 +521,9 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
         resetFingerState(state);
         state.baselineY = baselineYNow;
 
-        if (passedScore) {
+        if (passedScore && canFireTap(handIndex, fingerIndex, currT)) {
           tapEvent = candidate;
-          // If finger is already moving up strongly, go straight into new lift.
+
           if (vUp > upExitVel) {
             state.phase = "lift";
             state.liftStartY = currY;
@@ -486,8 +531,10 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
             state.liftMaxY = currY;
           }
         } else {
-          // Not a confirmed tap ⇒ still watch for upward release into lift
           if (vUp > upExitVel) {
+            const baselineYNow2 = state.baselineY;
+            resetFingerState(state);
+            state.baselineY = baselineYNow2;
             state.phase = "lift";
             state.liftStartY = currY;
             state.liftStartTime = currT;
@@ -495,7 +542,6 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
           }
         }
       } else {
-        // Even before evaluation, if we see a clear upward release, go to LIFT.
         if (vUp > upExitVel) {
           const baselineYNow = state.baselineY;
           resetFingerState(state);
@@ -516,7 +562,6 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
     }
   }
 
-  // ---- NEW: log phase changes *for every frame* ----
   const newPhase = state.phase || "idle";
   if (onPhaseChangeCallback && prevPhase !== newPhase) {
     onPhaseChangeCallback({
@@ -531,53 +576,9 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
   return tapEvent;
 }
 
-//////////////////////////
-// Core detection loop  //
-//////////////////////////
-
-function checkForTap() {
-  const potentialTapEvents = [];
-
-  for (let h = 0; h < 2; h++) {
-    const handHistory = tapHistory[h];
-    const handStates = tapStates[h];
-    if (!handHistory || !handStates) continue;
-
-    for (const f of TAP_FINGERTIP_INDICES) {
-      const history = handHistory[f];
-      const state = handStates[f];
-      if (!history || !state) continue;
-      if (history.length < 2) continue;
-
-      const tapEvent = updateFingerStateForTap(h, f, history, state);
-      if (tapEvent) potentialTapEvents.push(tapEvent);
-    }
-  }
-
-  return potentialTapEvents;
-}
-
-function processTapEvents(potentialTaps) {
-  if (!potentialTaps || potentialTaps.length === 0) return [];
-
-  // At most one tap per hand per frame: keep highest-scoring tap per hand.
-  const bestByHand = {};
-  for (const tap of potentialTaps) {
-    const h = tap.handIndex;
-    const prev = bestByHand[h];
-    if (!prev || tap.score > prev.score) {
-      bestByHand[h] = tap;
-    }
-  }
-
-  const finalTaps = Object.values(bestByHand);
-  if (onTapCallback) finalTaps.forEach((tap) => onTapCallback(tap));
-  return finalTaps;
-}
-
-//////////////////////////
-// Public API           //
-//////////////////////////
+///////////////////////////
+// Public API functions  //
+///////////////////////////
 
 export function initTapDetection(options = {}) {
   const {
@@ -623,16 +624,63 @@ export function setTapThresholds({
   if (typeof scoreThreshold === "number") {
     tapScoreThreshold = scoreThreshold;
   }
-
   updateDerivedThresholds();
 }
 
+// Prepare history/state
+function initTapState() {
+  tapHistory = { 0: {}, 1: {} };
+  tapStates = { 0: {}, 1: {} };
+  lastTapTime = { 0: {}, 1: {} };
+}
+
 export function updateTapFromLandmarks(landmarks, handIndex, timestampMs) {
-  recordHandMotion(landmarks, handIndex, timestampMs);
+  if (!landmarks || !landmarks.length) return;
+  const t = timestampMs;
+
+  for (const lmIndex of TAP_FINGERTIP_INDICES) {
+    if (!ENABLED_FINGERS[lmIndex]) continue;
+    const lm = landmarks[lmIndex];
+    if (!lm) continue;
+
+    const history = ensureHistory(handIndex, lmIndex);
+    history.push({ time: t, y: lm.y });
+
+    const cutoff = t - HISTORY_WINDOW_MS;
+    while (history.length && history[0].time < cutoff) {
+      history.shift();
+    }
+
+    if (history.length < MIN_HISTORY_SAMPLES) continue;
+  }
 }
 
 export function runTapDetectionFrame(timestampMs) {
-  const potentialTaps = checkForTap();
-  const finalTaps = processTapEvents(potentialTaps);
-  return finalTaps;
+  const t = timestampMs;
+
+  for (const handIndexStr of Object.keys(tapHistory)) {
+    const handIndex = parseInt(handIndexStr, 10);
+    const handHist = tapHistory[handIndex];
+    if (!handHist) continue;
+
+    for (const lmIndexStr of Object.keys(handHist)) {
+      const lmIndex = parseInt(lmIndexStr, 10);
+      if (!ENABLED_FINGERS[lmIndex]) continue;
+
+      const history = handHist[lmIndex];
+      if (!history || history.length < MIN_HISTORY_SAMPLES) continue;
+
+      const state = ensureFingerState(handIndex, lmIndex);
+      const tapEvent = updateFingerStateForTap(
+        handIndex,
+        lmIndex,
+        history,
+        state
+      );
+
+      if (tapEvent && onTapCallback) {
+        onTapCallback(tapEvent);
+      }
+    }
+  }
 }

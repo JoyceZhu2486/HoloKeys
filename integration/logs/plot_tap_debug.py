@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 '''
 
 python plot_tap_debug.py \
-  --motion fingertip_motion_2025-11-28T15-03-03-261Z.csv \
-  --candidates tap_candidates_2025-11-28T15-03-03-261Z.json \
-  --states tap_fsm_states_2025-11-28T15-03-03-261Z.json \
+  --motion fingertip_motion_2025-11-29T01-55-10-038Z.csv \
+  --candidates tap_candidates_2025-11-29T01-55-10-038Z.json \
+  --states tap_fsm_states_2025-11-29T01-55-10-038Z.json \
   --hand 0 \
   --finger 8
 
