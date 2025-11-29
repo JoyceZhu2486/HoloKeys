@@ -305,8 +305,7 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
   const currY = curr.y;
   const currT = curr.time;
 
-  const prevPhase = state.phase || "idle";
-  let tapEvent = null; // we will fill this only when a confirmed tap happens
+  const prevPhase = state.phase || "idle";  // NEW: remember previous phase
 
   const vSigned = computeSignedVelocity(history);
   const vDown = vSigned > 0 ? vSigned : 0;
@@ -418,6 +417,7 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
       const dwellFramesStable = state.dwellFramesStable;
       const dwellDurationMs = dwellElapsed;
 
+      // Decide when to evaluate a candidate
       const hasEnoughDwell =
         dwellFramesStable >= DWELL_MIN_FRAMES &&
         dwellDurationMs >= DWELL_MIN_DURATION_MS;
@@ -429,6 +429,7 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
         const avgVelocity =
           totalDuration > 0 ? totalDistance / totalDuration : 0;
 
+        // Mild hard gates: distance, duration, and **peak speed**.
         const passesHardGates =
           totalDistance >= minDistHard &&
           totalDistance <= MAX_DIST_HARD &&
@@ -448,36 +449,42 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
 
         const passedScore = confidence >= tapScoreThreshold && passesHardGates;
 
-        const candidate = {
+        const tapEvent = {
           id: `${handIndex}-${fingerIndex}-${currT.toFixed(1)}`,
           handIndex,
           fingerIndex,
           fingerName: TAP_FINGERTIP_NAMES[fingerIndex] || `LM${fingerIndex}`,
+
+          // timing
           timestamp: currT,
           totalDurationMs: tapDurationMs,
           dwellFrames: dwellFramesStable,
           dwellDurationMs: dwellDurationMs,
+
+          // motion
           startY: state.tapStartY,
           endY: currY,
           motionLength: totalDistance,
           speed: state.tapPeakDownVel,
           avgVelocity: avgVelocity,
-          decelMetric: 0,
+          decelMetric: 0, // placeholder, not used for gating now
+
+          // classifier
           score: confidence,
           passedScoreThreshold: passedScore,
           scoreThreshold: tapScoreThreshold,
         };
 
         if (onTapCandidateCallback) {
-          onTapCandidateCallback(candidate);
+          onTapCandidateCallback(tapEvent);
         }
 
+        // After evaluation, reset, and possibly go to new LIFT if releasing up
         const baselineYNow = state.baselineY;
         resetFingerState(state);
         state.baselineY = baselineYNow;
 
         if (passedScore) {
-          tapEvent = candidate;
           // If finger is already moving up strongly, go straight into new lift.
           if (vUp > upExitVel) {
             state.phase = "lift";
@@ -485,26 +492,41 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
             state.liftStartTime = currT;
             state.liftMaxY = currY;
           }
-        } else {
-          // Not a confirmed tap ⇒ still watch for upward release into lift
-          if (vUp > upExitVel) {
-            state.phase = "lift";
-            state.liftStartY = currY;
-            state.liftStartTime = currT;
-            state.liftMaxY = currY;
+          
+          // --- After FSM update: log phase change, if any ---
+          if (onPhaseChangeCallback && prevPhase !== state.phase) {
+            onPhaseChangeCallback({
+              handIndex,
+              fingerIndex,
+              fromPhase: prevPhase,
+              toPhase: state.phase,
+              timestamp: currT,
+            });
           }
+
+          return tapEvent;
         }
-      } else {
-        // Even before evaluation, if we see a clear upward release, go to LIFT.
+
+        // Not a confirmed tap ⇒ still watch for upward release into lift
         if (vUp > upExitVel) {
-          const baselineYNow = state.baselineY;
-          resetFingerState(state);
-          state.baselineY = baselineYNow;
           state.phase = "lift";
           state.liftStartY = currY;
           state.liftStartTime = currT;
           state.liftMaxY = currY;
         }
+
+        break;
+      }
+
+      // Even before evaluation, if we see a clear upward release, go to LIFT.
+      if (vUp > upExitVel) {
+        const baselineYNow = state.baselineY;
+        resetFingerState(state);
+        state.baselineY = baselineYNow;
+        state.phase = "lift";
+        state.liftStartY = currY;
+        state.liftStartTime = currT;
+        state.liftMaxY = currY;
       }
 
       break;
@@ -516,19 +538,7 @@ function updateFingerStateForTap(handIndex, fingerIndex, history, state) {
     }
   }
 
-  // ---- NEW: log phase changes *for every frame* ----
-  const newPhase = state.phase || "idle";
-  if (onPhaseChangeCallback && prevPhase !== newPhase) {
-    onPhaseChangeCallback({
-      handIndex,
-      fingerIndex,
-      fromPhase: prevPhase,
-      toPhase: newPhase,
-      timestamp: currT,
-    });
-  }
-
-  return tapEvent;
+  return null;
 }
 
 //////////////////////////
