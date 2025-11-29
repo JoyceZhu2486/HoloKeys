@@ -1,0 +1,1514 @@
+[
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 19987.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 20213.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 20255.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 20513.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 20555.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 20812
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 20852.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 21109.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 21150.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 21404.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 21447.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 21708.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 21750.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 22010.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 22051.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 22307.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 22349.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 22434.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 22646.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 22730.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 22779.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 23037.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 23208.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 23460.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 23847.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 24063.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 24106.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 24323.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 24581.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 24623.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 24838.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 25050.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 25091.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 25347.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 25390.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 25647.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 25819.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 26033.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 26120.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 26163.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 26421.899999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 26463.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 26551.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 26594.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 26637.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 26895.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 26938.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 27197.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 27241.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 27374.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 27462.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 27631.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 27893.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 27936.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 28194.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 28583.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 28839
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 28923.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 29181
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 29264.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 29522.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 29563.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 29822.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 29865.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 30124.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 30167.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 30337.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 30553.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 30639.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 30688.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 30948.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 30991.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 31120.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 31294.399999976158
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 31381.600000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 31432.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 31695.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 31740.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 31873
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 32091.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 32177
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 32226
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 32486.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 32531.100000023842
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 32789.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 32831.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 32918.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 33094
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 33181.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 33319.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 33580.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 33623
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 33795.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 34140.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 34182.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 34403.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 34447.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 34662.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 35006.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 35048.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 35306.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 35348.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 35520.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 35863
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 35907.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 36163.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 36206.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 36466.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 36509.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 36767.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 36810.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 37067.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 37111.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 37366.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 37411.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 37667.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 37710.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 37968.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 38011.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 38269
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 38312.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 38567.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 38612.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 38869.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 38913.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 39170.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 39214.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 39472.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 39515.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 39774.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 39816.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 40074.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 40117.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 40374.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 40419.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 40677.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 40719.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 40979.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 41065.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 41322.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 41583.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 41842.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 41886.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 42142.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 42531.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 42790.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 42919.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 43180.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 43222.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 43482.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 43698.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 43955.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 44043.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 44300.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 44429.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 44688.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 44816.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 45074.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 45205.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 45463.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 45506.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 45593.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "tapDwell",
+    "timestamp": 45811.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDwell",
+    "toPhase": "idle",
+    "timestamp": 45896.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 45945.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 46201.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 46246.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 46507.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 46551
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 46636.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 46981.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 47030.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 47291.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 47333.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 47593
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 47640
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 47897.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 47943.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 48203.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 48246.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 48507.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 48593.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 48853.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 48895.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 49157.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 49201.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 49462.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 49549.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 49809.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 49852.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 50114.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 50156.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 50417.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 50459.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 50720.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 50764.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 51027.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 51505.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 51762.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 51808.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 52066.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 52109.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 52239.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 52585.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 52936.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 53154.10000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 53284.799999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 53327.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 53546.699999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 53633.299999952316
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 53676.89999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "tapDescent",
+    "timestamp": 53895.39999997616
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "tapDescent",
+    "toPhase": "idle",
+    "timestamp": 53940.199999928474
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 53983.60000002384
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "lift",
+    "toPhase": "idle",
+    "timestamp": 54243.5
+  },
+  {
+    "handIndex": 0,
+    "fingerIndex": 8,
+    "fromPhase": "idle",
+    "toPhase": "lift",
+    "timestamp": 54289.699999928474
+  }
+]
