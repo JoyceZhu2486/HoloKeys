@@ -115,6 +115,10 @@
       <label><input type="checkbox" id="showDebug" checked> Show F/J X</label>
       <label><input type="checkbox" id="showTipLog"> Show fingertip log</label>
       <label><input type="checkbox" id="tapTypingMode"> Tap to type (disable hover)</label>
+      <label style="display:flex;align-items:center;gap:.25rem;">
+        <input type="checkbox" id="showTapLog" checked>
+        Show tap log
+      </label>      
  
       <button id="btnRecal" type="button">Recalibrate</button>
     </section>
@@ -159,6 +163,17 @@
           step="0.001"
           value="0.010">
       </label>
+
+      <label style="display:flex;align-items:center;gap:.5rem;">
+        Tap score threshold
+        <input
+          type="number"
+          id="inputScoreThreshold"
+          min="0"
+          max="1"
+          step="0.01"
+          value="0.20">
+      </label>
     </section>
 
     <!-- Camera preview + keyboard overlay -->
@@ -177,12 +192,12 @@
 
     <!-- Tap event log -->
     <section class="log-panel" id="tapLogPanel" style="display:none;">
-      <strong>Tap Events</strong>
-      <div class="tap-list" id="tapList">
-        <div style="padding: 4px 8px; color:#666; font-size:0.8rem;">
-          Tap events will appear here after calibration.
-        </div>
-      </div>
+      <h3>Tap Events</h3>
+      <p class="hint">
+        This log shows every tap candidate with its score and mapping.
+      </p>
+      <div id="tapList" class="tap-list"></div>
+      <button id="btnExportTapLog">Save logs (taps + motion + FSM)</button>
     </section>
 
     <!-- Typed text -->
