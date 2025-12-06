@@ -438,7 +438,6 @@ function handlePressureTap(evt) {
       ? evt.handIndex
       : 0;
 
-  // Update status for both in case we don't know which side
   setPressureStatus(pressureStatusLeft, `${fingerName}: tap`);
   setPressureStatus(pressureStatusRight, `${fingerName}: tap`);
 
@@ -479,6 +478,18 @@ function getTapOverlayPoint(tapEvent) {
       );
     }
 
+    // If still nothing, try any hand with the same finger name (MediaPipe ordering can flip)
+    if (!tip && targetName) {
+      tip = lastTipsForTap.find(t =>
+        (t.finger === targetName || t.fingerName === targetName)
+      );
+    }
+
+    // Last resort: any tip with matching landmark index
+    if (!tip) {
+      tip = lastTipsForTap.find(t => t.landmarkIndex === fingerIndex);
+    }
+
     if (tip && typeof tip.x === 'number' && typeof tip.y === 'number') {
       // Refined tips are already in overlay pixel coordinates
       return { x: tip.x, y: tip.y };
@@ -488,8 +499,12 @@ function getTapOverlayPoint(tapEvent) {
   // 2) Fallback: use raw landmarks (normalized) if no refined tip found
   if (!lastHandsForTap || !lastHandsForTap.length) return null;
 
-  const hand = lastHandsForTap[handIndex];
-  if (!hand || hand.length <= fingerIndex) return null;
+  // If specific hand is missing, fall back to the first hand that has this finger index.
+  let hand = lastHandsForTap[handIndex];
+  if (!hand || hand.length <= fingerIndex) {
+    hand = lastHandsForTap.find(h => h && h.length > fingerIndex);
+  }
+  if (!hand) return null;
 
   const lm = hand[fingerIndex];
   if (!lm) return null;
@@ -902,17 +917,15 @@ function recomputeFromAverages() {
 
       buttonEl.onclick = async () => {
         const isLeft = forcedHandIndex === 0;
-        if (isLeft && stopPressureLeft) {
-          try { await stopPressureLeft(); } catch (_) {}
-          stopPressureLeft = null;
-          buttonEl.textContent = 'Connect pressure (Left)';
-          setPressureStatus(statusEl, 'Disconnected');
-          return;
-        }
-        if (!isLeft && stopPressureRight) {
-          try { await stopPressureRight(); } catch (_) {}
-          stopPressureRight = null;
-          buttonEl.textContent = 'Connect pressure (Right)';
+        const existingStop = isLeft ? stopPressureLeft : stopPressureRight;
+
+        // Disconnect if already connected
+        if (existingStop) {
+          try { await existingStop(); } catch (_) {}
+          if (isLeft) stopPressureLeft = null; else stopPressureRight = null;
+          buttonEl.textContent = isLeft
+            ? 'Connect pressure (Left)'
+            : 'Connect pressure (Right)';
           setPressureStatus(statusEl, 'Disconnected');
           return;
         }

@@ -1,11 +1,13 @@
 // pressure.js
 // Lightweight Web Serial bridge for pressure-sensor taps from Arduino.
 // Expected serial format (newline-delimited):
-//   handIndex, sensorIndex, state
+//   sensorIndex, state
 // Example lines:
-//   0,1,tapped
-//   0,1,idle
-// If your Arduino only sends sensorIndex + state, handIndex defaults to 0.
+//   1,tapped
+//   1,idle
+// If your Arduino sends handIndex too, we read it, otherwise the
+// caller can force a handIndex per connection (recommended when you
+// run two Arduinos, one per hand).
 
 const FINGER_NAMES = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'];
 const FINGER_TO_LANDMARK = { Thumb: 4, Index: 8, Middle: 12, Ring: 16, Pinky: 20 };
@@ -21,7 +23,7 @@ function parseLine(line) {
   let state = null;
 
   if (parts.length === 1) {
-    // state only
+    // state only (rare)
     state = parts[0];
   } else if (parts.length === 2) {
     // sensorIndex, state
@@ -56,12 +58,7 @@ function isTapped(state) {
 }
 
 // Open Web Serial and stream events. Returns a disconnect function.
-export async function connectPressureSensors({
-  baudRate = 115200,
-  onTap,
-  onState,
-  forcedHandIndex = null
-} = {}) {
+export async function connectPressureSensors({ baudRate = 115200, onTap, onState } = {}) {
   if (!('serial' in navigator)) {
     throw new Error('Web Serial not supported in this browser.');
   }
@@ -90,10 +87,6 @@ export async function connectPressureSensors({
         for (const raw of lines) {
           const evt = parseLine(raw.trim());
           if (!evt) continue;
-          if (forcedHandIndex !== null) {
-            evt.handIndex = forcedHandIndex;
-          }
-
           if (typeof onState === 'function') onState(evt);
           if (isTapped(evt.state) && typeof onTap === 'function') onTap(evt);
         }
