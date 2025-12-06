@@ -113,6 +113,13 @@
       <span id="pressureStatusLeft" class="status" aria-live="polite"></span>
       <button id="btnConnectPressureRight" type="button">Connect pressure (Right)</button>
       <span id="pressureStatusRight" class="status" aria-live="polite"></span>
+      <label style="display:flex;align-items:center;gap:.35rem;">
+        Tap input
+        <select id="tapInputSource">
+          <option value="vision">Camera taps</option>
+          <option value="pressure">Pressure sensors</option>
+        </select>
+      </label>
 
       <!-- Match Version A IDs for these two: -->
       <label><input type="checkbox" id="showHands" checked> Show landmarks</label>

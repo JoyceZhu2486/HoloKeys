@@ -59,6 +59,7 @@ const btnConnectPressureLeft = document.getElementById('btnConnectPressureLeft')
 const btnConnectPressureRight = document.getElementById('btnConnectPressureRight');
 const pressureStatusLeft = document.getElementById('pressureStatusLeft');
 const pressureStatusRight = document.getElementById('pressureStatusRight');
+const tapInputSourceSel = document.getElementById('tapInputSource');
 
 const inputSpeedThreshold = document.getElementById('inputSpeedThreshold');
 const inputDistanceThreshold = document.getElementById('inputDistanceThreshold');
@@ -192,6 +193,7 @@ let tapLatencyLog = [];
 // Pressure sensor stream cleanup
 let stopPressureLeft = null;
 let stopPressureRight = null;
+let tapInputSource = 'vision'; // 'vision' | 'pressure'
 
 // ---------- Drawing helpers ----------
 
@@ -422,6 +424,7 @@ function doTyping(tips, quad){
 // Pressure-sensor taps feed into the same tap → key path
 function handlePressureTap(evt) {
   if (!frozen) return; // needs calibrated keyboard + tracked fingertips
+  if (tapInputSource !== 'pressure') return;
 
   const fingerName =
     evt?.fingerName ||
@@ -957,6 +960,16 @@ function recomputeFromAverages() {
     setupPressureButton(btnConnectPressureLeft, pressureStatusLeft, 0);
     setupPressureButton(btnConnectPressureRight, pressureStatusRight, 1);
 
+    if (tapInputSourceSel) {
+      tapInputSourceSel.value = tapInputSource;
+      tapInputSourceSel.onchange = () => {
+        tapInputSource = tapInputSourceSel.value === 'pressure' ? 'pressure' : 'vision';
+        const modeLabel = tapInputSource === 'pressure' ? 'Pressure sensors' : 'Camera taps';
+        setPressureStatus(pressureStatusLeft, `Mode: ${modeLabel}`);
+        setPressureStatus(pressureStatusRight, `Mode: ${modeLabel}`);
+      };
+    }
+
     // Tap threshold UI listeners
     if (inputSpeedThreshold) {
       inputSpeedThreshold.addEventListener('input', (e) => {
@@ -1181,10 +1194,11 @@ function mainLoop() {
   // Save landmarks for tap→key mapping
   lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
 
-  // Vision-based tap detection: only when calibration is finished and
-  // pressure sensors are not connected (to avoid double-typing).
+  // Vision-based tap detection: only when calibration is finished, taps are set to "vision",
+  // and pressure sensors are not connected (to avoid double-typing).
   const pressureActive = !!(stopPressureLeft || stopPressureRight);
-  if (!pressureActive && frozen && result && result.landmarks && result.landmarks.length) {
+  const visionMode = tapInputSource === 'vision';
+  if (visionMode && !pressureActive && frozen && result && result.landmarks && result.landmarks.length) {
     const hands = result.landmarks;
     const numHands = Math.min(hands.length, 2);
 
