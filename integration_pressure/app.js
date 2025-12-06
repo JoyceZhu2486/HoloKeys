@@ -55,8 +55,10 @@ const ratioDefaultBtn = document.getElementById('ratioDefault');
 const editor = document.getElementById('editor');
 const focusEditorBtn = document.getElementById('focusEditorBtn');
 const clearEditorBtn = document.getElementById('clearEditorBtn');
-const btnConnectPressure = document.getElementById('btnConnectPressure');
-const pressureStatusEl = document.getElementById('pressureStatus');
+const btnConnectPressureLeft = document.getElementById('btnConnectPressureLeft');
+const btnConnectPressureRight = document.getElementById('btnConnectPressureRight');
+const pressureStatusLeft = document.getElementById('pressureStatusLeft');
+const pressureStatusRight = document.getElementById('pressureStatusRight');
 
 const inputSpeedThreshold = document.getElementById('inputSpeedThreshold');
 const inputDistanceThreshold = document.getElementById('inputDistanceThreshold');
@@ -137,8 +139,8 @@ function pressKey(key) {
   }
 }
 
-function setPressureStatus(msg) {
-  if (pressureStatusEl) pressureStatusEl.textContent = msg;
+function setPressureStatus(el, msg) {
+  if (el) el.textContent = msg;
 }
 
 // ---------- Calibration / typing state ----------
@@ -188,7 +190,8 @@ let tapLatencyLog = [];
 // }
 
 // Pressure sensor stream cleanup
-let stopPressureStream = null;
+let stopPressureLeft = null;
+let stopPressureRight = null;
 
 // ---------- Drawing helpers ----------
 
@@ -435,7 +438,9 @@ function handlePressureTap(evt) {
       ? evt.handIndex
       : 0;
 
-  setPressureStatus(`${fingerName}: tap`);
+  // Update status for both in case we don't know which side
+  setPressureStatus(pressureStatusLeft, `${fingerName}: tap`);
+  setPressureStatus(pressureStatusRight, `${fingerName}: tap`);
 
   const tapEvent = {
     id: `pressure-${Date.now()}`,
@@ -891,40 +896,53 @@ function recomputeFromAverages() {
       });
     }
 
-    // Pressure sensor connect / disconnect
-    setPressureStatus('Not connected');
-    if (btnConnectPressure) {
-      btnConnectPressure.onclick = async () => {
-        // Disconnect if already connected
-        if (stopPressureStream) {
-          try { await stopPressureStream(); } catch (_) {}
-          stopPressureStream = null;
-          btnConnectPressure.textContent = 'Connect pressure sensors';
-          setPressureStatus('Disconnected');
+    const setupPressureButton = (buttonEl, statusEl, forcedHandIndex) => {
+      if (!buttonEl) return;
+      setPressureStatus(statusEl, 'Not connected');
+
+      buttonEl.onclick = async () => {
+        const isLeft = forcedHandIndex === 0;
+        if (isLeft && stopPressureLeft) {
+          try { await stopPressureLeft(); } catch (_) {}
+          stopPressureLeft = null;
+          buttonEl.textContent = 'Connect pressure (Left)';
+          setPressureStatus(statusEl, 'Disconnected');
+          return;
+        }
+        if (!isLeft && stopPressureRight) {
+          try { await stopPressureRight(); } catch (_) {}
+          stopPressureRight = null;
+          buttonEl.textContent = 'Connect pressure (Right)';
+          setPressureStatus(statusEl, 'Disconnected');
           return;
         }
 
         try {
-          btnConnectPressure.disabled = true;
-          setPressureStatus('Connecting…');
-          stopPressureStream = await connectPressureSensors({
+          buttonEl.disabled = true;
+          setPressureStatus(statusEl, 'Connecting…');
+          const stopFn = await connectPressureSensors({
+            forcedHandIndex,
             onTap: handlePressureTap,
             onState: (evt) => {
               if (evt?.fingerName && evt.state) {
-                setPressureStatus(`${evt.fingerName}: ${evt.state}`);
+                setPressureStatus(statusEl, `${evt.fingerName}: ${evt.state}`);
               }
             }
           });
-          btnConnectPressure.textContent = 'Disconnect pressure';
-          setPressureStatus('Connected');
+          if (isLeft) stopPressureLeft = stopFn; else stopPressureRight = stopFn;
+          buttonEl.textContent = 'Disconnect';
+          setPressureStatus(statusEl, 'Connected');
         } catch (err) {
           console.error(err);
-          setPressureStatus(err?.message || 'Failed to connect');
+          setPressureStatus(statusEl, err?.message || 'Failed to connect');
         } finally {
-          btnConnectPressure.disabled = false;
+          buttonEl.disabled = false;
         }
       };
-    }
+    };
+
+    setupPressureButton(btnConnectPressureLeft, pressureStatusLeft, 0);
+    setupPressureButton(btnConnectPressureRight, pressureStatusRight, 1);
 
     // Tap threshold UI listeners
     if (inputSpeedThreshold) {
@@ -1152,7 +1170,8 @@ function mainLoop() {
 
   // Vision-based tap detection: only when calibration is finished and
   // pressure sensors are not connected (to avoid double-typing).
-  if (!stopPressureStream && frozen && result && result.landmarks && result.landmarks.length) {
+  const pressureActive = !!(stopPressureLeft || stopPressureRight);
+  if (!pressureActive && frozen && result && result.landmarks && result.landmarks.length) {
     const hands = result.landmarks;
     const numHands = Math.min(hands.length, 2);
 

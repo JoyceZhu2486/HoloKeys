@@ -56,7 +56,12 @@ function isTapped(state) {
 }
 
 // Open Web Serial and stream events. Returns a disconnect function.
-export async function connectPressureSensors({ baudRate = 115200, onTap, onState } = {}) {
+export async function connectPressureSensors({
+  baudRate = 115200,
+  onTap,
+  onState,
+  forcedHandIndex = null
+} = {}) {
   if (!('serial' in navigator)) {
     throw new Error('Web Serial not supported in this browser.');
   }
@@ -85,6 +90,10 @@ export async function connectPressureSensors({ baudRate = 115200, onTap, onState
         for (const raw of lines) {
           const evt = parseLine(raw.trim());
           if (!evt) continue;
+          if (forcedHandIndex !== null) {
+            evt.handIndex = forcedHandIndex;
+          }
+
           if (typeof onState === 'function') onState(evt);
           if (isTapped(evt.state) && typeof onTap === 'function') onTap(evt);
         }
