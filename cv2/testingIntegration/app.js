@@ -19,40 +19,45 @@ import {
 
 // ---------- UI refs ----------
 
-const statusEl      = document.getElementById('status');
-const btnStartRear  = document.getElementById('btnStartRear');
+const statusEl = document.getElementById('status');
+const btnStartRear = document.getElementById('btnStartRear');
 const btnStartFront = document.getElementById('btnStartFront');
-const btnStop       = document.getElementById('btnStop');
-const btnSnap       = document.getElementById('btnSnap');
-const chkBlack      = document.getElementById('chkBlack');
+const btnStop = document.getElementById('btnStop');
+const btnSnap = document.getElementById('btnSnap');
+const chkBlack = document.getElementById('chkBlack');
 
-const showHandsChk  = document.getElementById('showHands');
-const showDebugChk  = document.getElementById('showDebug');
+const showHandsChk = document.getElementById('showHands');
+const showDebugChk = document.getElementById('showDebug');
 const showTipLogChk = document.getElementById('showTipLog');
-const tipLogPanel   = document.getElementById('tipLogPanel');
-const contactLogEl  = document.getElementById('contactLog');
-const btnRecal      = document.getElementById('btnRecal');
+const showTapLogChk = document.getElementById('showTapLog');
+const tipLogPanel = document.getElementById('tipLogPanel');
+const contactLogEl = document.getElementById('contactLog');
+const btnRecal = document.getElementById('btnRecal');
 const tapTypingModeChk = document.getElementById('tapTypingMode');
 
-const video   = document.getElementById('video');
+const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
-const octx    = overlay.getContext('2d');
+const octx = overlay.getContext('2d');
 
-const stageWrap     = document.getElementById('stageWrap');
-const tapLogPanel   = document.getElementById('tapLogPanel');
-const tapList       = document.getElementById('tapList');
+const stageWrap = document.getElementById('stageWrap');
+const tapList = document.getElementById('tapList');
 
-const heightSlider      = document.getElementById('height');
-const ratioSlider       = document.getElementById('ratio');
-const heightDefaultBtn  = document.getElementById('heightDefault');
-const ratioDefaultBtn   = document.getElementById('ratioDefault');
+// We will use this as the single "Save all logs" button.
+const btnExportTapLog = document.getElementById('btnExportTapLog');
+// btnExportMotionLog exists in HTML but is unused now (one-button export).
 
-const editor        = document.getElementById('editor');
+const heightSlider = document.getElementById('height');
+const ratioSlider = document.getElementById('ratio');
+const heightDefaultBtn = document.getElementById('heightDefault');
+const ratioDefaultBtn = document.getElementById('ratioDefault');
+
+const editor = document.getElementById('editor');
 const focusEditorBtn = document.getElementById('focusEditorBtn');
 const clearEditorBtn = document.getElementById('clearEditorBtn');
 
-const inputSpeedThreshold    = document.getElementById('inputSpeedThreshold');
+const inputSpeedThreshold = document.getElementById('inputSpeedThreshold');
 const inputDistanceThreshold = document.getElementById('inputDistanceThreshold');
+const inputScoreThreshold = document.getElementById('inputScoreThreshold');
 
 // ---------- Constants ----------
 
@@ -70,18 +75,23 @@ const TIP_COLOR_GRADIENT = '#3b82f6'; // M5 success
 const TIP_COLOR_FALLBACK = '#dc2626'; // M5 -> M2 fallback
 
 // Storage keys for tap thresholds
-const SPEED_STORAGE_KEY    = 'tapVelocityThreshold';
+const SPEED_STORAGE_KEY = 'tapVelocityThreshold';
 const DISTANCE_STORAGE_KEY = 'tapMinTapDistance';
+const SCORE_STORAGE_KEY = 'tapScoreThreshold';
+
+// Currently highlighted key (for tap feedback)
+let highlightedKeyLabel = null;
+let highlightedKeyUntilMs = 0;
 
 // ---------- Editor helpers ----------
 
-function focusEditor(){ editor?.focus(); }
+function focusEditor() { editor?.focus(); }
 
-function setValueAndCaret(text, caretPos){
+function setValueAndCaret(text, caretPos) {
   if (!editor) return;
   const wasFocused = document.activeElement === editor;
   editor.value = text;
-  editor.dispatchEvent(new Event('input', {bubbles:true}));
+  editor.dispatchEvent(new Event('input', { bubbles: true }));
   if (!wasFocused) editor.blur();
   else editor.setSelectionRange(caretPos, caretPos);
 }
@@ -129,35 +139,32 @@ let frozenJ = null;          // averaged J from last 1s at freeze time
 let quad = null;      // {LB,RB,TR,TL}
 let lastFJ = null;    // {F:{x,y}, J:{x,y}} — last frame during calibration
 
-let lastW=0, lastH=0;
+let lastW = 0, lastH = 0;
 let lastKey = null, lastKeyTime = 0;
-
-// Currently highlighted key (for tap feedback)
-let highlightedKeyLabel = null;
-let highlightedKeyUntilMs = 0;
-
-let highlightedFinger = null;
-let highlightedFingerUntilMs = 0;
-
 
 // Latest raw hand landmarks (normalized coordinates) for tap mapping
 let lastHandsForTap = [];
 
-// NEW: Latest refined fingertip contact points (M5/M2) for tap→key mapping
+// Latest refined fingertip positions (overlay coordinates) for tap mapping
 let lastTipsForTap = [];
 
-// ---------- Typing log state ----------
-// (used by typeKeyLabel for both hover + tap typing)
-let typingLog = [];              // array of { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
+// ---------- Typing & tap logs ----------
+
+let typingLog = [];              // { timeMs, timeAbsMs, label, source, x, y, handIndex, finger }
 let typingSessionStartMs = null; // set when calibration finishes
 
 // Tap candidate log (for threshold tuning)
-let tapCandidateLog = [];  // array of { timeAbsMs, score, speed, motionLength, handIndex, fingerIndex, fingerName, x, y, keyLabel }
+let tapCandidateLog = [];  // { ... from logTapCandidate }
 
+// Fingertip motion log for index finger (per-frame samples, for plotting)
+let fingertipMotionLog = [];   // { t, handIndex, x_raw, y_raw, x_refined, y_refined, tapCandidate }
+
+// FSM phase-change events from tap.js
+let tapPhaseEvents = [];       // { handIndex, fingerIndex, fromPhase, toPhase, timestamp }
 
 // ---------- Drawing helpers ----------
 
-function drawHands(result, W, H){
+function drawHands(result, W, H) {
   if (!showHandsChk?.checked) return;
   const hands = result?.landmarks;
   if (!hands?.length) return;
@@ -178,12 +185,12 @@ function drawHands(result, W, H){
     octx.beginPath();
     for (const [startIdx, endIdx] of HAND_CONNECTIONS) {
       const start = hand[startIdx];
-      const end   = hand[endIdx];
+      const end = hand[endIdx];
       if (!start || !end) continue;
       const startX = start.x * w;
       const startY = start.y * h;
-      const endX   = end.x * w;
-      const endY   = end.y * h;
+      const endX = end.x * w;
+      const endY = end.y * h;
       octx.moveTo(startX, startY);
       octx.lineTo(endX, endY);
     }
@@ -203,7 +210,7 @@ function drawHands(result, W, H){
   octx.restore();
 }
 
-function drawFingertipMarkers(tips){
+function drawFingertipMarkers(tips) {
   if (!showHandsChk?.checked) return;
   if (!tips || !tips.length) return;
 
@@ -264,31 +271,7 @@ function drawTapKeyHighlight(q) {
   octx.restore();
 }
 
-function drawTapFingerHighlight(tips) {
-  if (!highlightedFinger || performance.now() > highlightedFingerUntilMs) {
-    highlightedFinger = null;
-    return;
-  }
-  if (!tips || !tips.length) return;
-
-  const tip = tips.find(
-    t => t.handIndex === highlightedFinger.handIndex &&
-         t.finger === highlightedFinger.fingerName
-  );
-  if (!tip) return;
-
-  octx.save();
-  octx.beginPath();
-  octx.arc(tip.x, tip.y, 14, 0, Math.PI * 2);
-  octx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-  octx.lineWidth = 4;
-  octx.stroke();
-  octx.restore();
-}
-
-
-
-function updateTipLog(result, tips){
+function updateTipLog(result, tips) {
   if (!showTipLogChk) return;
 
   if (!showTipLogChk.checked) {
@@ -310,7 +293,7 @@ function updateTipLog(result, tips){
   let html = '';
   for (let hi = 0; hi < hands.length; hi++) {
     const handLabel = (handedness[hi]?.[0]?.categoryName) || 'Unknown'; // Left / Right
-    html += `<div class="log-hand-label">Hand ${hi+1} (${handLabel})</div>`;
+    html += `<div class="log-hand-label">Hand ${hi + 1} (${handLabel})</div>`;
 
     const handTips = tips.filter(t => t.handIndex === hi);
     if (!handTips.length) {
@@ -345,9 +328,6 @@ function typeKeyLabel(label, source, meta) {
   if (source === 'tap') {
     highlightedKeyLabel   = label;
     highlightedKeyUntilMs = now + 180; // ms to show highlight
-
-    highlightedFinger = meta?.fingerTip; // you’ll pass this from tap.js
-    highlightedFingerUntilMs = now + 180;
   }
 
   // Logging
@@ -408,28 +388,40 @@ function doTyping(tips, quad){
   });
 }
 
-
-// Convert a tapEvent's fingertip to overlay pixel coordinates.
-// Prefer the refined M5/M2 contact point (what you actually see),
-// and fall back to the raw landmark if needed.
+// Convert a tapEvent's fingertip to overlay pixel coordinates
 function getTapOverlayPoint(tapEvent) {
   if (!overlay) return null;
   const { handIndex, fingerIndex, fingerName } = tapEvent;
-  if (handIndex == null) return null;
+  if (handIndex == null || fingerIndex == null) return null;
 
-  // 1) Prefer refined fingertip contact point from refineFingertips
-  //    These are already in overlay pixel coordinates and respect MIRROR_PREVIEW.
-  if (lastTipsForTap && lastTipsForTap.length && fingerName) {
-    const tip = lastTipsForTap.find(
-      t => t.handIndex === handIndex && t.finger === fingerName
-    );
-    if (tip && Number.isFinite(tip.x) && Number.isFinite(tip.y)) {
+  // 1) Prefer refined fingertips from the last frame
+  if (lastTipsForTap && lastTipsForTap.length) {
+    const targetName = fingerName || null;
+
+    let tip = null;
+    if (targetName) {
+      tip = lastTipsForTap.find(t =>
+        t.handIndex === handIndex &&
+        (t.finger === targetName || t.fingerName === targetName)
+      );
+    }
+
+    // If name match failed, try matching by handIndex + landmark index
+    if (!tip) {
+      tip = lastTipsForTap.find(t =>
+        t.handIndex === handIndex &&
+        t.landmarkIndex === fingerIndex
+      );
+    }
+
+    if (tip && typeof tip.x === 'number' && typeof tip.y === 'number') {
+      // Refined tips are already in overlay pixel coordinates
       return { x: tip.x, y: tip.y };
     }
   }
 
-  // 2) Fallback: raw MediaPipe fingertip landmark (old behavior)
-  if (!lastHandsForTap || !lastHandsForTap.length || fingerIndex == null) return null;
+  // 2) Fallback: use raw landmarks (normalized) if no refined tip found
+  if (!lastHandsForTap || !lastHandsForTap.length) return null;
 
   const hand = lastHandsForTap[handIndex];
   if (!hand || hand.length <= fingerIndex) return null;
@@ -440,7 +432,6 @@ function getTapOverlayPoint(tapEvent) {
   let xNorm = lm.x;
   const yNorm = lm.y;
 
-  // Match preview mirroring
   if (MIRROR_PREVIEW) {
     xNorm = 1 - xNorm;
   }
@@ -449,7 +440,6 @@ function getTapOverlayPoint(tapEvent) {
   const y = yNorm * overlay.height;
   return { x, y };
 }
-
 
 // Use existing keyboard mapping to find which key (if any) is under the tap
 function mapTapToKey(tapEvent) {
@@ -465,7 +455,7 @@ function mapTapToKey(tapEvent) {
   return {
     label: hit.label,
     point: pt
-  };
+  }; 
 }
 
 function logTapCandidate(tapEvent) {
@@ -474,23 +464,69 @@ function logTapCandidate(tapEvent) {
   const mapped = mapTapToKey(tapEvent);  // may be null if outside keyboard
 
   const entry = {
-    timeAbsMs: tapEvent.timestamp,
-    score: tapEvent.score,
-    speed: tapEvent.speed,
-    motionLength: tapEvent.motionLength,
-    dwellFrames: tapEvent.dwellFrames,
-    dwellDurationMs: tapEvent.dwellDurationMs,
+    // raw event info from tap.js
+    id: tapEvent.id || null,
     handIndex: tapEvent.handIndex,
     fingerIndex: tapEvent.fingerIndex,
-    fingerName: tapEvent.fingerName,
+    fingerName: tapEvent.fingerName || null,
+
+    timestamp: tapEvent.timestamp,
+    totalDurationMs: tapEvent.totalDurationMs,
+    dwellFrames: tapEvent.dwellFrames,
+    dwellDurationMs: tapEvent.dwellDurationMs,
+
+    startY: tapEvent.startY,
+    endY: tapEvent.endY,
+    motionLength: tapEvent.motionLength,
+    speed: tapEvent.speed,
+    avgVelocity: tapEvent.avgVelocity,
+    decelMetric: tapEvent.decelMetric,
+
+    score: tapEvent.score,
+    passedScoreThreshold: !!tapEvent.passedScoreThreshold,
+    scoreThreshold: tapEvent.scoreThreshold ?? null,
+
+    // mapping info
     x: pt ? pt.x : null,
     y: pt ? pt.y : null,
-    keyLabel: mapped ? mapped.label : null
+    keyLabel: mapped ? mapped.label : null,
+
+    // label to be filled later (e.g., "real", "glitch", etc.)
+    label: null
   };
 
   tapCandidateLog.push(entry);
-  // For quick inspection while tuning:
   console.log('[Tap candidate]', entry);
+}
+
+// Per-frame fingertip motion logging for index fingertips
+function logIndexMotionForPlot(result, tips, nowMs) {
+  if (!result || !result.landmarks || !result.landmarks.length || !tips || !tips.length) {
+    return;
+  }
+
+  for (let handIndex = 0; handIndex < result.landmarks.length; handIndex++) {
+    const handLms = result.landmarks[handIndex];
+    if (!handLms[8]) continue;   // LM 8 is index fingertip
+
+    const lm = handLms[8];
+    const refined = tips.find(t => t.handIndex === handIndex && t.finger === "Index");
+
+    // Optional: attach the last tap candidate (for convenience when plotting)
+    const lastCand = tapCandidateLog.length
+      ? tapCandidateLog[tapCandidateLog.length - 1]
+      : null;
+
+    fingertipMotionLog.push({
+      t: nowMs,
+      handIndex,
+      x_raw: lm.x,
+      y_raw: lm.y,
+      x_refined: refined?.x ?? null,
+      y_refined: refined?.y ?? null,
+      tapCandidate: lastCand
+    });
+  }
 }
 
 // ---------- Tap UI helpers ----------
@@ -532,23 +568,40 @@ function flashTapBorder(tapEvent){
   }
 }
 
+function updateTapLogVisibility() {
+  // tapLogPanel may or may not exist in HTML; guard it.
+  if (!tapList) return;
+  if (showTapLogChk && !showTapLogChk.checked) {
+    if (tapList.parentElement) {
+      tapList.parentElement.style.display = 'none';
+    }
+  } else {
+    if (tapList.parentElement) {
+      tapList.parentElement.style.display = 'block';
+    }
+  }
+}
 
-async function addTapRecord(tapEvent){
+async function addTapRecord(tapEvent) {
   if (!tapList) return;
 
   try {
-    if (tapLogPanel) tapLogPanel.style.display = 'block';
+    if (tapList.parentElement) {
+      if (!showTapLogChk || showTapLogChk.checked) {
+        tapList.parentElement.style.display = 'block';
+      }
+    }
 
     const blob = await cam.captureJpeg({ quality: 0.75 });
     if (!blob) return;
 
     const url = URL.createObjectURL(blob);
 
-    const handLabel   = `Hand ${tapEvent.handIndex + 1}`;
+    const handLabel = `Hand ${tapEvent.handIndex + 1}`;
     const fingerLabel = tapEvent.fingerName || `LM${tapEvent.fingerIndex}`;
     const speedPerSec = tapEvent.speed * 1000; // y-units per second
-    const dist        = tapEvent.motionLength;
-    const tMs         = tapEvent.timestamp.toFixed(1);
+    const dist = tapEvent.motionLength;
+    const tMs = tapEvent.timestamp.toFixed(1);
 
     const card = document.createElement('div');
     card.className = 'tap-record';
@@ -563,7 +616,7 @@ async function addTapRecord(tapEvent){
     `;
 
     if (!tapList.firstElementChild ||
-        !tapList.firstElementChild.classList.contains('tap-record')) {
+      !tapList.firstElementChild.classList.contains('tap-record')) {
       tapList.innerHTML = '';
     }
 
@@ -578,9 +631,17 @@ async function addTapRecord(tapEvent){
   }
 }
 
+// ---------- FSM phase logging ----------
+
+function handleTapPhaseChange(ev) {
+  // You can filter to index only if you want:
+  // if (ev.fingerIndex !== 8) return;
+  tapPhaseEvents.push(ev);
+}
+
 // ---------- Calibration helpers ----------
 
-function startCalibration(){
+function startCalibration() {
   frozen = false;
   calibStartMs = 0;
 
@@ -594,12 +655,8 @@ function startCalibration(){
   statusEl.textContent = 'Calibrating… (place index fingertips on F and J)';
 }
 
-
-function recomputeFromAverages(){
+function recomputeFromAverages() {
   // Use the averaged F/J from the last ~1s of calibration.
-  // At freeze time we store them in frozenF/frozenJ; if those are not
-  // available (e.g., during live calibration while sliders change), fall
-  // back to the current sliding window or lastFJ.
   let F = frozenF;
   let J = frozenJ;
 
@@ -626,15 +683,16 @@ function recomputeFromAverages(){
 
 // ---------- Main setup ----------
 
-(async function main(){
+(async function main() {
   statusEl.textContent = 'Loading model…';
   try {
     await initHands();
     await cam.listCameras();
 
     // Tap thresholds + localStorage
-    let initialSpeed    = 0.00015;
+    let initialSpeed = 0.00015;
     let initialDistance = 0.010;
+    let initialScore = 0.20;
 
     const storedSpeed = localStorage.getItem(SPEED_STORAGE_KEY);
     if (storedSpeed !== null) {
@@ -648,31 +706,33 @@ function recomputeFromAverages(){
       if (!Number.isNaN(v) && v > 0) initialDistance = v;
     }
 
+    const storedScore = localStorage.getItem(SCORE_STORAGE_KEY);
+    if (storedScore !== null) {
+      const v = parseFloat(storedScore);
+      if (!Number.isNaN(v) && v >= 0 && v <= 1) initialScore = v;
+    }
+
     initTapDetection({
       onTap: (tapEvent) => {
         // taps are only run after frozen in mainLoop
         flashTapBorder(tapEvent);
-    
-        // 🔹 Highlight the key
-        const { label, handIndex, fingerName } = tapEvent;
-        typeKeyLabel(label, 'tap', {
-          fingerTip: { handIndex, fingerName },
-        });
       },
-    
       onTapCandidate: (tapEvent) => {
         // log ALL candidate taps (including ones below score threshold)
         logTapCandidate(tapEvent);
+        // show card in the Tap Events panel
+        addTapRecord(tapEvent);
       },
-    
+      onPhaseChange: handleTapPhaseChange,
       velocityThreshold: initialSpeed,
       distanceThreshold: initialDistance,
+      scoreThreshold: initialScore
     });
-    
 
-    // Optional: make logs accessible from the browser console
+    // Make logs accessible from the browser console
     window.tapCandidateLog = tapCandidateLog;
-
+    window.fingertipMotionLog = fingertipMotionLog;
+    window.tapPhaseEvents = tapPhaseEvents;
 
     if (inputSpeedThreshold) {
       inputSpeedThreshold.value = String(initialSpeed);
@@ -680,11 +740,14 @@ function recomputeFromAverages(){
     if (inputDistanceThreshold) {
       inputDistanceThreshold.value = String(initialDistance);
     }
+    if (inputScoreThreshold) {
+      inputScoreThreshold.value = String(initialScore.toFixed(6));
+    }
 
     statusEl.textContent = 'Ready. Start camera.';
 
     // Start / stop camera
-    if (btnStartRear)  btnStartRear.onclick  = () => start(cam.startRear);
+    if (btnStartRear) btnStartRear.onclick = () => start(cam.startRear);
     if (btnStartFront) btnStartFront.onclick = () => start(cam.startFront);
     if (cam.camSel) {
       cam.camSel.onchange = () => start(cam.selectDevice, cam.camSel.value);
@@ -714,7 +777,7 @@ function recomputeFromAverages(){
 
     // Geometry sliders
     if (heightSlider) setHeightScale(heightSlider.value);
-    if (ratioSlider)  setTopShrink(ratioSlider.value);
+    if (ratioSlider) setTopShrink(ratioSlider.value);
 
     if (heightSlider) {
       heightSlider.addEventListener('input', e => {
@@ -765,6 +828,91 @@ function recomputeFromAverages(){
       });
     }
 
+    if (inputScoreThreshold) {
+      inputScoreThreshold.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (Number.isNaN(v) || v < 0 || v > 1) return;
+        setTapThresholds({ scoreThreshold: v });
+        localStorage.setItem(SCORE_STORAGE_KEY, String(v));
+      });
+    }
+
+    // ONE BUTTON to export all logs: tap candidates, motion, FSM states
+    if (btnExportTapLog) {
+      btnExportTapLog.onclick = () => {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+
+        // 1) Tap candidates as JSON
+        const tapJson = JSON.stringify(tapCandidateLog, null, 2);
+        const tapBlob = new Blob([tapJson], { type: 'application/json' });
+        let url = URL.createObjectURL(tapBlob);
+        let a = document.createElement('a');
+        a.href = url;
+        a.download = `tap_candidates_${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        // 2) Fingertip motion as CSV
+        if (fingertipMotionLog.length) {
+          const headers = [
+            "t","handIndex",
+            "x_raw","y_raw",
+            "x_refined","y_refined",
+            "tapScore","tapSpeed","tapDist","tapLabel"
+          ];
+
+          const rows = fingertipMotionLog.map(s => {
+            const cand = s.tapCandidate;
+            return [
+              s.t,
+              s.handIndex,
+              s.x_raw,
+              s.y_raw,
+              s.x_refined,
+              s.y_refined,
+              cand?.score ?? "",
+              cand?.speed ?? "",
+              cand?.motionLength ?? "",
+              cand?.label ?? ""
+            ].join(",");
+          });
+
+          const csv = [headers.join(","), ...rows].join("\n");
+          const csvBlob = new Blob([csv], { type: "text/csv" });
+          url = URL.createObjectURL(csvBlob);
+          a = document.createElement("a");
+          a.href = url;
+          a.download = `fingertip_motion_${ts}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } else {
+          alert("No motion log data recorded yet.");
+        }
+
+        // 3) FSM phase events as JSON
+        const phaseJson = JSON.stringify(tapPhaseEvents, null, 2);
+        const phaseBlob = new Blob([phaseJson], { type: 'application/json' });
+        url = URL.createObjectURL(phaseBlob);
+        a = document.createElement('a');
+        a.href = url;
+        a.download = `tap_fsm_states_${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    // Tap log visibility toggle
+    if (showTapLogChk) {
+      showTapLogChk.addEventListener('change', updateTapLogVisibility);
+      updateTapLogVisibility();
+    }
+
     // Editor helpers
     if (focusEditorBtn) focusEditorBtn.onclick = () => editor?.focus();
     if (clearEditorBtn) clearEditorBtn.onclick = () => setValueAndCaret('', 0);
@@ -776,10 +924,10 @@ function recomputeFromAverages(){
 
 // ---------- Camera start/stop ----------
 
-async function start(startFn, ...args){
-  if (btnStartRear)  btnStartRear.disabled  = true;
+async function start(startFn, ...args) {
+  if (btnStartRear) btnStartRear.disabled = true;
   if (btnStartFront) btnStartFront.disabled = true;
-  if (btnStop)       btnStop.disabled       = true;
+  if (btnStop) btnStop.disabled = true;
   statusEl.textContent = 'Starting camera…';
   try {
     await startFn(...args);
@@ -795,12 +943,12 @@ async function start(startFn, ...args){
     console.error(e);
     statusEl.textContent = `Error starting camera: ${e.message}`;
   } finally {
-    if (btnStartRear)  btnStartRear.disabled  = false;
+    if (btnStartRear) btnStartRear.disabled = false;
     if (btnStartFront) btnStartFront.disabled = false;
   }
 }
 
-function stop(){
+function stop() {
   cam.stopStream();
   clearOverlay();
   statusEl.textContent = 'Stopped.';
@@ -809,34 +957,24 @@ function stop(){
 
 // ---------- Main loop ----------
 
-function mainLoop(){
+function mainLoop() {
   const W = video.videoWidth, H = video.videoHeight;
   if (!W || !H) return;
 
-  if (W!==lastW || H!==lastH){
-    lastW=W; lastH=H;
-    resizeOverlayToVideo(W,H);
+  if (W !== lastW || H !== lastH) {
+    lastW = W; lastH = H;
+    resizeOverlayToVideo(W, H);
   }
 
   const result = detect();
-  const nowMs  = performance.now();
+  const nowMs = performance.now();
 
-  // Save landmarks for tap→key mapping (fallback)
+  // Save landmarks for tap→key mapping
   lastHandsForTap = (result && result.landmarks) ? result.landmarks : [];
-
-  clearOverlay();
-  drawHands(result, W, H); // respects Show landmarks
-
-  // Refine fingertip contact points (what you *see* as circles)
-  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
-  lastTipsForTap = tips || [];           // NEW: remember refined tips for taps
-  drawFingertipMarkers(tips);
-  drawTapFingerHighlight(lastTipsForTap);
-  updateTipLog(result, tips);
 
   // Tap detection: ONLY when calibration is finished
   if (frozen && result && result.landmarks && result.landmarks.length) {
-    const hands    = result.landmarks;
+    const hands = result.landmarks;
     const numHands = Math.min(hands.length, 2);
 
     for (let handIndex = 0; handIndex < numHands; handIndex++) {
@@ -847,14 +985,26 @@ function mainLoop(){
     runTapDetectionFrame(nowMs);
   }
 
-  // During calibration: follow fingertips and maintain sliding 1s window of F/J
-  if (!frozen && tips && tips.length){
-    const idx = tips.filter(t => t.finger === 'Index').sort((a,b)=>a.x-b.x);
-    if (idx.length >= 2){
-      const F = idx[0], J = idx[idx.length-1];
-      lastFJ = { F:{x:F.x,y:F.y}, J:{x:J.x,y:J.y} };
+  clearOverlay();
+  drawHands(result, W, H); // respects Show landmarks
 
-      quad = computeQuadFromFJ({x:F.x,y:F.y},{x:J.x,y:J.y});
+  const tips = result ? refineFingertips(result, W, H, MIRROR_PREVIEW) : [];
+  lastTipsForTap = tips;
+
+  // Per-frame motion logging for Index fingertips (for plotting)
+  logIndexMotionForPlot(result, tips, nowMs);
+
+  drawFingertipMarkers(tips);
+  updateTipLog(result, tips);
+
+  // During calibration: follow fingertips and maintain sliding 1s window of F/J
+  if (!frozen && tips && tips.length) {
+    const idx = tips.filter(t => t.finger === 'Index').sort((a, b) => a.x - b.x);
+    if (idx.length >= 2) {
+      const F = idx[0], J = idx[idx.length - 1];
+      lastFJ = { F: { x: F.x, y: F.y }, J: { x: J.x, y: J.y } };
+
+      quad = computeQuadFromFJ({ x: F.x, y: F.y }, { x: J.x, y: J.y });
 
       // start timer on first valid quad
       const now = performance.now();
@@ -865,7 +1015,7 @@ function mainLoop(){
       const cutoff = now - 1000;
       fjSamples = fjSamples.filter(s => s.t >= cutoff);
 
-      const elapsed = (now - calibStartMs)/1000;
+      const elapsed = (now - calibStartMs) / 1000;
       if (elapsed >= 10) {
         frozen = true;
 
@@ -880,7 +1030,6 @@ function mainLoop(){
           frozenF = { x: sumFx / n, y: sumFy / n };
           frozenJ = { x: sumJx / n, y: sumJy / n };
         } else if (lastFJ) {
-          // Fallback: if for some reason we have no window, use last frame
           frozenF = { x: lastFJ.F.x, y: lastFJ.F.y };
           frozenJ = { x: lastFJ.J.x, y: lastFJ.J.y };
         } else {
@@ -909,7 +1058,7 @@ function mainLoop(){
 
   // F/J debug crosses
   if (showDebugChk?.checked) {
-    const drawX = (pt, r=6) => {
+    const drawX = (pt, r = 6) => {
       octx.beginPath();
       octx.moveTo(pt.x - r, pt.y - r); octx.lineTo(pt.x + r, pt.y + r);
       octx.moveTo(pt.x + r, pt.y - r); octx.lineTo(pt.x - r, pt.y + r);
