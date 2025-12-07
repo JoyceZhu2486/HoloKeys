@@ -97,6 +97,13 @@
   <header>
     <strong>HoloKeys – Integrated Demo</strong>
     <span class="status" id="status">Idle</span>
+    <label style="display:flex;align-items:center;gap:.35rem;">
+      Mode
+      <select id="modeSelect">
+        <option value="testing">Testing</option>
+        <option value="user">User</option>
+      </select>
+    </label>
   </header>
 
   <main>
@@ -152,7 +159,7 @@
     </section>
 
     <!-- Tap thresholds -->
-    <section class="toolbar">
+    <section class="toolbar" id="tapThresholdsSection">
       <label style="display:flex;align-items:center;gap:.5rem;">
         Tap start speed
         <input

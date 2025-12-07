@@ -51,6 +51,7 @@ const heightSlider = document.getElementById('height');
 const ratioSlider = document.getElementById('ratio');
 const heightDefaultBtn = document.getElementById('heightDefault');
 const ratioDefaultBtn = document.getElementById('ratioDefault');
+const tapThresholdsSection = document.getElementById('tapThresholdsSection');
 
 const editor = document.getElementById('editor');
 const focusEditorBtn = document.getElementById('focusEditorBtn');
@@ -60,6 +61,7 @@ const btnConnectPressureRight = document.getElementById('btnConnectPressureRight
 const pressureStatusLeft = document.getElementById('pressureStatusLeft');
 const pressureStatusRight = document.getElementById('pressureStatusRight');
 const tapInputSourceSel = document.getElementById('tapInputSource');
+const modeSelect = document.getElementById('modeSelect');
 
 const inputSpeedThreshold = document.getElementById('inputSpeedThreshold');
 const inputDistanceThreshold = document.getElementById('inputDistanceThreshold');
@@ -79,6 +81,10 @@ const HAND_CONNECTIONS = [
 // Fingertip marker colors
 const TIP_COLOR_GRADIENT = '#3b82f6'; // M5 success
 const TIP_COLOR_FALLBACK = '#dc2626'; // M5 -> M2 fallback
+
+const DEFAULT_TAP_SPEED = 0.00015;
+const DEFAULT_TAP_DISTANCE = 0.010;
+const DEFAULT_TAP_SCORE = 0.20;
 
 const FINGER_LANDMARK_BY_NAME = {
   Thumb: 4,
@@ -144,6 +150,17 @@ function setPressureStatus(el, msg) {
   if (el) el.textContent = msg;
 }
 
+function getLabelEl(el) {
+  if (!el) return null;
+  if (el.tagName === 'LABEL') return el;
+  return el.closest('label');
+}
+
+function setHidden(el, hidden) {
+  if (!el) return;
+  el.style.display = hidden ? 'none' : '';
+}
+
 // ---------- Calibration / typing state ----------
 
 // Calibration state
@@ -194,6 +211,7 @@ let tapLatencyLog = [];
 let stopPressureLeft = null;
 let stopPressureRight = null;
 let tapInputSource = 'vision'; // 'vision' | 'pressure'
+let uiMode = 'testing';        // 'testing' | 'user'
 
 // ---------- Drawing helpers ----------
 
@@ -453,6 +471,48 @@ function handlePressureTap(evt) {
   };
 
   flashTapBorder(tapEvent);
+}
+
+// Toggle between testing (full UI) and user (minimal UI) modes
+function applyUiMode(mode) {
+  uiMode = mode === 'user' ? 'user' : 'testing';
+  if (modeSelect) modeSelect.value = uiMode;
+  const isUser = uiMode === 'user';
+
+  const hideList = [
+    btnStartRear,
+    getLabelEl(chkBlack),
+    btnSnap,
+    getLabelEl(showTipLogChk),
+    getLabelEl(showTapLogChk),
+    getLabelEl(showDebugChk),
+    getLabelEl(tapTypingModeChk),
+    tapThresholdsSection
+  ];
+  hideList.forEach(el => setHidden(el, isUser));
+
+  if (isUser) {
+    if (chkBlack) chkBlack.checked = false;
+    if (showTipLogChk) showTipLogChk.checked = false;
+    if (showTapLogChk) showTapLogChk.checked = false;
+    if (showDebugChk) showDebugChk.checked = false;
+    if (tapTypingModeChk) {
+      tapTypingModeChk.checked = true;
+      tapTypingModeChk.disabled = true;
+    }
+    if (inputSpeedThreshold) inputSpeedThreshold.value = DEFAULT_TAP_SPEED;
+    if (inputDistanceThreshold) inputDistanceThreshold.value = DEFAULT_TAP_DISTANCE;
+    if (inputScoreThreshold) inputScoreThreshold.value = DEFAULT_TAP_SCORE;
+    setTapThresholds({
+      velocityThreshold: DEFAULT_TAP_SPEED,
+      distanceThreshold: DEFAULT_TAP_DISTANCE,
+      scoreThreshold: DEFAULT_TAP_SCORE
+    });
+    updateTapLogVisibility();
+    if (tipLogPanel) tipLogPanel.style.display = 'none';
+  } else {
+    if (tapTypingModeChk) tapTypingModeChk.disabled = false;
+  }
 }
 
 // Convert a tapEvent's fingertip to overlay pixel coordinates
@@ -793,9 +853,9 @@ function recomputeFromAverages() {
     await cam.listCameras();
 
     // Tap thresholds + localStorage
-    let initialSpeed = 0.00015;
-    let initialDistance = 0.010;
-    let initialScore = 0.20;
+    let initialSpeed = DEFAULT_TAP_SPEED;
+    let initialDistance = DEFAULT_TAP_DISTANCE;
+    let initialScore = DEFAULT_TAP_SCORE;
 
     const storedSpeed = localStorage.getItem(SPEED_STORAGE_KEY);
     if (storedSpeed !== null) {
@@ -959,6 +1019,13 @@ function recomputeFromAverages() {
 
     setupPressureButton(btnConnectPressureLeft, pressureStatusLeft, 0);
     setupPressureButton(btnConnectPressureRight, pressureStatusRight, 1);
+
+    if (modeSelect) {
+      modeSelect.onchange = () => applyUiMode(modeSelect.value);
+    }
+
+    // Apply initial UI mode (default testing)
+    applyUiMode(uiMode);
 
     if (tapInputSourceSel) {
       tapInputSourceSel.value = tapInputSource;
