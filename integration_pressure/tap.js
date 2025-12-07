@@ -59,7 +59,7 @@ const MAX_DUR_HARD           = 650;     // ms, above this is probably not a sing
 
 // --- Score threshold ---
 // User can override via slider.
-const DEFAULT_TAP_SCORE_THRESHOLD = 0.5;
+const DEFAULT_TAP_SCORE_THRESHOLD = 0.2;
 let tapScoreThreshold = DEFAULT_TAP_SCORE_THRESHOLD;
 
 // --- Tunable thresholds controlled by UI ---
